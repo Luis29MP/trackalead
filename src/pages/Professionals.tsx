@@ -8,15 +8,17 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
-import type { Professional } from '@/types'
+import type { Professional, ProRate } from '@/types'
 
 interface ProForm {
   name: string; phone: string; email: string; specialty: string
-  is_active: boolean; app_access: boolean
+  is_active: boolean; app_access: boolean; rates: ProRate[]
 }
-const EMPTY: ProForm = { name: '', phone: '', email: '', specialty: '', is_active: true, app_access: false }
+const EMPTY: ProForm = { name: '', phone: '', email: '', specialty: '', is_active: true, app_access: false, rates: [] }
 
 export function Professionals() {
   const [professionals, setProfessionals] = useState<Professional[]>([])
@@ -51,7 +53,7 @@ export function Professionals() {
 
   function openEdit(p: Professional) {
     setEditing(p)
-    setForm({ name: p.name, phone: p.phone ?? '', email: p.email ?? '', specialty: p.specialty ?? '', is_active: p.is_active, app_access: p.app_access })
+    setForm({ name: p.name, phone: p.phone ?? '', email: p.email ?? '', specialty: p.specialty ?? '', is_active: p.is_active, app_access: p.app_access, rates: p.rates ?? [] })
     setMagicLink(p.app_access && p.magic_token ? `${window.location.origin}/pro/${p.magic_token}` : '')
     setDialog(true)
   }
@@ -64,6 +66,7 @@ export function Professionals() {
         const { data } = await supabase.from('professionals').update({
           name: form.name, phone: form.phone || null, email: form.email || null,
           specialty: form.specialty || null, is_active: form.is_active, app_access: form.app_access,
+          rates: form.rates,
         }).eq('id', editing.id).select().single()
         if (data?.app_access && data.magic_token) {
           setMagicLink(`${window.location.origin}/pro/${data.magic_token}`)
@@ -74,6 +77,7 @@ export function Professionals() {
           org_id: organization!.id,
           name: form.name, phone: form.phone || null, email: form.email || null,
           specialty: form.specialty || null, is_active: form.is_active, app_access: form.app_access,
+          rates: form.rates,
         }).select().single()
         if (data?.app_access && data.magic_token) {
           setMagicLink(`${window.location.origin}/pro/${data.magic_token}`)
@@ -101,6 +105,17 @@ export function Professionals() {
     setCopied(true)
     toast.success('Enlace copiado')
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  // ── Tarifas ────────────────────────────────────────────────────────────────
+  function addRate() {
+    setForm(f => ({ ...f, rates: [...f.rates, { work_type: '', min_price: 0, rec_price: 0, unit: 'ud' }] }))
+  }
+  function updateRate(i: number, patch: Partial<ProRate>) {
+    setForm(f => ({ ...f, rates: f.rates.map((r, idx) => idx === i ? { ...r, ...patch } : r) }))
+  }
+  function removeRate(i: number) {
+    setForm(f => ({ ...f, rates: f.rates.filter((_, idx) => idx !== i) }))
   }
 
   function sendWhatsApp(pro: Professional, link: string) {
@@ -243,35 +258,95 @@ export function Professionals() {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label>Nombre *</Label>
-                <Input placeholder="Carlos López" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Especialidad</Label>
-                <Input placeholder="Electricista, Fontanero…" value={form.specialty} onChange={e => setForm(f => ({ ...f, specialty: e.target.value }))} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Teléfono</Label>
-                  <Input placeholder="600 000 000" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Email</Label>
-                  <Input type="email" placeholder="carlos@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <Switch checked={form.is_active} onCheckedChange={v => setForm(f => ({ ...f, is_active: v }))} />
-                <Label>Activo</Label>
-              </div>
-              <div className="flex items-center gap-3 p-3 bg-indigo-50 rounded-lg border border-indigo-100">
-                <Switch checked={form.app_access} onCheckedChange={v => setForm(f => ({ ...f, app_access: v }))} />
-                <div>
-                  <p className="text-sm font-medium text-indigo-800">Acceso a la app</p>
-                  <p className="text-xs text-indigo-500">Genera un enlace único para que vea sus trabajos asignados sin contraseña</p>
-                </div>
-              </div>
+              <Tabs defaultValue="datos">
+                <TabsList className="mb-3">
+                  <TabsTrigger value="datos">Datos</TabsTrigger>
+                  <TabsTrigger value="tarifas">Tarifas</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="datos" className="space-y-4 mt-0">
+                  <div className="space-y-1.5">
+                    <Label>Nombre *</Label>
+                    <Input placeholder="Carlos López" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Especialidad</Label>
+                    <Input placeholder="Electricista, Fontanero…" value={form.specialty} onChange={e => setForm(f => ({ ...f, specialty: e.target.value }))} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label>Teléfono</Label>
+                      <Input placeholder="600 000 000" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Email</Label>
+                      <Input type="email" placeholder="carlos@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Switch checked={form.is_active} onCheckedChange={v => setForm(f => ({ ...f, is_active: v }))} />
+                    <Label>Activo</Label>
+                  </div>
+                  <div className="flex items-center gap-3 p-3 bg-indigo-50 rounded-lg border border-indigo-100">
+                    <Switch checked={form.app_access} onCheckedChange={v => setForm(f => ({ ...f, app_access: v }))} />
+                    <div>
+                      <p className="text-sm font-medium text-indigo-800">Acceso a la app</p>
+                      <p className="text-xs text-indigo-500">Genera un enlace único para que vea sus trabajos asignados sin contraseña</p>
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="tarifas" className="space-y-2 mt-0">
+                  <p className="text-xs text-gray-400">Tarifas de referencia. La IA las usará al generar presupuestos para leads asignados a este profesional.</p>
+                  <div className="border border-gray-100 rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 text-[10px] text-gray-500 uppercase">
+                          <th className="text-left px-2 py-2">Tipo de trabajo</th>
+                          <th className="text-right px-1 py-2 w-20">Mín. €</th>
+                          <th className="text-right px-1 py-2 w-20">Rec. €</th>
+                          <th className="text-left px-1 py-2 w-20">Unidad</th>
+                          <th className="w-7"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {form.rates.map((r, i) => (
+                          <tr key={i}>
+                            <td className="px-1 py-1">
+                              <Input value={r.work_type} onChange={e => updateRate(i, { work_type: e.target.value })} placeholder="Alicatado…" className="h-8 text-xs border-0 focus-visible:ring-1" />
+                            </td>
+                            <td className="px-1 py-1">
+                              <Input type="number" min={0} step="0.01" value={r.min_price} onChange={e => updateRate(i, { min_price: Number(e.target.value) })} className="h-8 text-xs text-right border-0 focus-visible:ring-1" />
+                            </td>
+                            <td className="px-1 py-1">
+                              <Input type="number" min={0} step="0.01" value={r.rec_price} onChange={e => updateRate(i, { rec_price: Number(e.target.value) })} className="h-8 text-xs text-right border-0 focus-visible:ring-1" />
+                            </td>
+                            <td className="px-1 py-1">
+                              <Select value={r.unit} onValueChange={v => updateRate(i, { unit: v })}>
+                                <SelectTrigger className="h-8 text-xs px-2"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="ud">ud</SelectItem>
+                                  <SelectItem value="hora">hora</SelectItem>
+                                  <SelectItem value="m²">m²</SelectItem>
+                                  <SelectItem value="ml">ml</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </td>
+                            <td className="px-1 py-1 text-center">
+                              <button onClick={() => removeRate(i)} className="text-red-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+                            </td>
+                          </tr>
+                        ))}
+                        {form.rates.length === 0 && (
+                          <tr><td colSpan={5} className="text-center text-xs text-gray-400 py-4">Sin tarifas configuradas</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={addRate} className="gap-1.5"><Plus className="h-3.5 w-3.5" />Añadir tarifa</Button>
+                </TabsContent>
+              </Tabs>
+
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setDialog(false)}>Cancelar</Button>
                 <Button onClick={handleSave} disabled={saving || !form.name.trim()}>

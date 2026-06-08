@@ -139,6 +139,13 @@ export interface LeadActivity {
   profile?: Profile
 }
 
+export interface ProRate {
+  work_type: string       // tipo de trabajo
+  min_price: number       // precio mínimo
+  rec_price: number       // precio recomendado
+  unit: string            // hora, m², ud…
+}
+
 export interface Professional {
   id: string
   org_id: string
@@ -151,6 +158,39 @@ export interface Professional {
   magic_token: string | null
   app_access: boolean
   last_access: string | null
+  rates?: ProRate[]
+}
+
+export type BudgetStatus = 'draft' | 'sent' | 'accepted' | 'rejected'
+
+export interface BudgetLine {
+  concept: string
+  units: number
+  unit_price: number
+  total: number
+}
+
+export interface Budget {
+  id: string
+  org_id: string
+  lead_id: string | null
+  created_by: string | null
+  client_name: string | null
+  client_phone: string | null
+  client_address: string | null
+  concept: string | null
+  lines: BudgetLine[]
+  subtotal: number
+  vat_percent: number
+  vat_amount: number
+  total: number
+  margin_percent: number
+  validity_days: number
+  notes: string | null
+  status: BudgetStatus
+  ai_generated: boolean
+  created_at: string
+  updated_at: string
 }
 
 export type EventType = 'visita_presencial' | 'llamada' | 'seguimiento' | 'presupuesto_insitu' | 'reunion' | 'otro'

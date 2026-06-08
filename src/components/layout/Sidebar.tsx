@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, LayoutGrid, Map, Calendar, DollarSign,
   HardHat, Users, Bell, Settings, LogOut, Radar,
-  ChevronDown, Check, Building2, Shield, Star,
+  ChevronDown, Check, Building2, Shield, Star, FileText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { to: '/map',           icon: Map,             label: 'Mapa' },
   { to: '/calendar',      icon: Calendar,        label: 'Calendario' },
   { to: '/finances',      icon: DollarSign,      label: 'Finanzas' },
+  { to: '/budgets',       icon: FileText,        label: 'Presupuestos' },
   { to: '/professionals', icon: HardHat,         label: 'Profesionales' },
   { to: '/team',          icon: Users,           label: 'Equipo' },
   { to: '/notifications', icon: Bell,            label: 'Notificaciones' },
