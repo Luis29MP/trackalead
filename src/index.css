@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+
+  html, body {
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    padding: 0;
+    background-color: #F8FAFC;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  /* Escritorio: ancho mínimo para layout de sidebar */
+  @media (min-width: 768px) {
+    html, body, #root {
+      min-width: 1200px;
+    }
+  }
+}
+
+/* Columnas Kanban: responsive */
+.kanban-col { width: 85vw; }
+@media (min-width: 768px) { .kanban-col { width: 272px; } }
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #D1D5DB transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #D1D5DB; border-radius: 3px; }
+}

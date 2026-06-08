@@ -1,0 +1,15 @@
+-- Desactivar RLS temporalmente para desarrollo
+-- Ejecutar en: Supabase → SQL Editor
+
+ALTER TABLE profiles           DISABLE ROW LEVEL SECURITY;
+ALTER TABLE organizations      DISABLE ROW LEVEL SECURITY;
+ALTER TABLE org_members        DISABLE ROW LEVEL SECURITY;
+ALTER TABLE boards             DISABLE ROW LEVEL SECURITY;
+ALTER TABLE leads              DISABLE ROW LEVEL SECURITY;
+ALTER TABLE board_columns      DISABLE ROW LEVEL SECURITY;
+ALTER TABLE lead_files         DISABLE ROW LEVEL SECURITY;
+ALTER TABLE lead_comments      DISABLE ROW LEVEL SECURITY;
+ALTER TABLE lead_activity      DISABLE ROW LEVEL SECURITY;
+ALTER TABLE professionals      DISABLE ROW LEVEL SECURITY;
+ALTER TABLE calendar_events    DISABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications      DISABLE ROW LEVEL SECURITY;

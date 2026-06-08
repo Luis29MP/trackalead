@@ -1,0 +1,561 @@
+import { useState, useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import {
+  DndContext, DragOverlay, closestCenter,
+  KeyboardSensor, PointerSensor, useSensor, useSensors,
+  type DragStartEvent, type DragEndEvent,
+} from '@dnd-kit/core'
+import { useDroppable } from '@dnd-kit/core'
+import {
+  SortableContext, sortableKeyboardCoordinates,
+  verticalListSortingStrategy, useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import {
+  Plus, ArrowLeft, Wrench, MapPin, ChevronLeft, ChevronRight,
+  ClipboardPaste, Calendar,
+} from 'lucide-react'
+import { toast } from 'sonner'
+import { useBoardColumns } from '@/hooks/useBoards'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/context/AuthContext'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { formatCurrency, formatRelativeTime, sourceLabel } from '@/lib/utils'
+import type { Board, Lead, BoardColumn } from '@/types'
+
+// ── Smart paste ───────────────────────────────────────────────────────────────────
+function parsePastedText(text: string): Partial<NewLeadForm> {
+  const r: Partial<NewLeadForm> = {}
+  const phone = text.match(/(?:(?:tlf|tel|teléfono|móvil|celular)\s*:?\s*)?(\+?[\d]{3}[\s\-]?[\d]{3}[\s\-]?[\d]{3,4})/i)
+  if (phone) r.phone = phone[1].replace(/[\s\-]/g, '')
+  const email = text.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)
+  if (email) r.email = email[0]
+  const zone = text.match(/(?:zona|ciudad|localidad|población|municipio)\s*:?\s*([A-Za-záéíóúÁÉÍÓÚñÑ\s,]+?)(?:\n|$|,)/i)
+  if (zone) r.zone = zone[1].trim()
+  const concept = text.match(/(?:trabajo|concepto|servicio|tipo|obra|reforma|selecciona\s+servicio)\s*:?\s*([^\n,]+)/i)
+  if (concept) r.concept = concept[1].trim()
+  // Mensaje / descripción → trabajo a realizar
+  const msg = text.match(/(?:mensaje|descripci[oó]n|detalle|comentario)\s*:?\s*([^\n]{10,})/i)
+  if (msg) r.notes = msg[1].trim()
+  // Nombre: primera línea sin teléfono ni email
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+  const nameLine = lines.find(l => !l.match(/\d{9}/) && !l.includes('@') && l.length > 2 && l.length < 70)
+  if (nameLine) r.name = nameLine.replace(/^(?:nombre|cliente|contacto|name)\s*:\s*/i, '').trim()
+  return r
+}
+
+// ── Lead Card ─────────────────────────────────────────────────────────────────────
+function LeadCard({ lead, columns, onClick, onMove }: {
+  lead: Lead
+  columns: BoardColumn[]
+  onClick: () => void
+  onMove: (leadId: string, toColumnId: string) => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: lead.id })
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.35 : 1 }
+
+  const currentColIdx = columns.findIndex(c => c.id === lead.column_id)
+  const prevCol = columns[currentColIdx - 1]
+  const nextCol = columns[currentColIdx + 1]
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="group bg-white rounded-lg border border-gray-200 p-3 shadow-sm hover:shadow-md transition-shadow select-none relative"
+    >
+      {/* Drag handle area — all except the move buttons */}
+      <div
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing"
+        onClick={(e) => { e.stopPropagation(); onClick() }}
+      >
+        {/* Row 1: name + NUEVO badge */}
+        <div className="flex items-start justify-between gap-1 mb-1">
+          <p className="font-semibold text-[13px] text-gray-900 leading-tight line-clamp-2">{lead.name}</p>
+          {lead.is_read === false && (
+            <span className="shrink-0 text-[9px] font-black bg-red-500 text-white rounded px-1 py-0.5 leading-none mt-0.5">NUEVO</span>
+          )}
+        </div>
+
+        {/* Concepto */}
+        {lead.concept && (
+          <div className="flex items-center gap-1 mb-1">
+            <Wrench className="h-3 w-3 text-primary-500 shrink-0" />
+            <span className="text-xs text-primary-600 font-medium truncate">{lead.concept}</span>
+          </div>
+        )}
+
+        {/* Zona */}
+        {(lead.zone || lead.address) && (
+          <div className="flex items-center gap-1 text-xs text-gray-400 mb-1">
+            <MapPin className="h-3 w-3 shrink-0" />
+            <span className="truncate">{lead.zone || lead.address}</span>
+          </div>
+        )}
+
+        {/* Footer: presupuesto + fecha */}
+        <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-gray-100">
+          {lead.budget_amount
+            ? <span className="text-xs font-bold text-amber-600">{formatCurrency(lead.budget_amount)}</span>
+            : <span />
+          }
+          <div className="flex items-center gap-1 text-[11px] text-gray-400">
+            <Calendar className="h-3 w-3" />
+            {formatRelativeTime(lead.created_at)}
+          </div>
+        </div>
+      </div>
+
+      {/* Botones mover columna (visibles siempre en mobile, al hover en desktop) */}
+      <div className="absolute bottom-1.5 right-1.5 flex gap-0.5 opacity-0 group-hover:opacity-100 sm:opacity-100 sm:static sm:hidden transition-opacity">
+        {prevCol && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onMove(lead.id, prevCol.id) }}
+            className="p-0.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-500"
+            title={`Mover a: ${prevCol.name}`}
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {nextCol && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onMove(lead.id, nextCol.id) }}
+            className="p-0.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-500"
+            title={`Mover a: ${nextCol.name}`}
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Kanban Column ────────────────────────────────────────────────────────────────
+// - Ancho fijo 272px (flex-shrink:0)
+// - Altura = 100% del contenedor padre (que ocupa toda la altura disponible)
+// - Scroll vertical sólo en el área de tarjetas
+function KanbanColumn({ column, columns, onLeadClick, onAddLead, onMove }: {
+  column: BoardColumn
+  columns: BoardColumn[]
+  onLeadClick: (l: Lead) => void
+  onAddLead: (id: string) => void
+  onMove: (leadId: string, toColumnId: string) => void
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: column.id })
+
+  return (
+    <div
+      className="kanban-col flex flex-col rounded-xl border border-gray-200 bg-gray-50"
+      style={{ flexShrink: 0, height: '100%' }}
+    >
+      {/* Cabecera fija */}
+      <div
+        className="flex items-center justify-between px-3 py-2.5 border-b border-gray-200 rounded-t-xl shrink-0"
+        style={{ borderTopColor: column.color, borderTopWidth: 3 }}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-gray-700">{column.name}</span>
+          <span className="text-xs text-gray-400 bg-gray-200 rounded-full px-1.5 py-0.5 font-semibold leading-none">
+            {column.leads?.length ?? 0}
+          </span>
+        </div>
+        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onAddLead(column.id)}>
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      {/* Zona de drop: ocupa el resto de la altura, scroll vertical */}
+      <SortableContext
+        items={(column.leads ?? []).map(l => l.id)}
+        strategy={verticalListSortingStrategy}
+      >
+        <div
+          ref={setNodeRef}
+          className={`flex-1 overflow-y-auto p-2 space-y-2 rounded-b-xl transition-colors ${isOver ? 'bg-primary-50' : ''}`}
+          style={{ minHeight: 80 }}
+        >
+          {(column.leads ?? []).map(lead => (
+            <LeadCard
+              key={lead.id}
+              lead={lead}
+              columns={columns}
+              onClick={() => onLeadClick(lead)}
+              onMove={onMove}
+            />
+          ))}
+          {(column.leads ?? []).length === 0 && !isOver && (
+            <div className="text-center py-8 text-gray-300 text-xs">Arrastra aquí</div>
+          )}
+        </div>
+      </SortableContext>
+    </div>
+  )
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────────
+interface NewLeadForm {
+  name: string; company: string; concept: string; zone: string
+  phone: string; email: string; source: string; notes: string
+}
+const EMPTY: NewLeadForm = { name: '', company: '', concept: '', zone: '', phone: '', email: '', source: 'form', notes: '' }
+
+// ── Main ──────────────────────────────────────────────────────────────────────────
+export function KanbanBoard() {
+  const { id: boardId } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const { organization, user } = useAuth()
+  const { columns, loading, refetch } = useBoardColumns(boardId!)
+  const [board, setBoard] = useState<Board | null>(null)
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [dialog, setDialog] = useState(false)
+  const [targetColumnId, setTargetColumnId] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState<NewLeadForm>(EMPTY)
+  const [pasteText, setPasteText] = useState('')
+  const [summarizing, setSummarizing] = useState(false)
+  const [geoStatus, setGeoStatus] = useState<'idle' | 'loading' | 'ok' | 'fail'>('idle')
+  const [latLng, setLatLng] = useState<{ lat: number; lng: number } | null>(null)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+
+  useEffect(() => {
+    if (!boardId) return
+    supabase.from('boards').select('*').eq('id', boardId).maybeSingle().then(({ data }) => setBoard(data))
+  }, [boardId])
+
+  const allLeads = columns.flatMap(c => c.leads ?? [])
+  const activeLead = activeId ? allLeads.find(l => l.id === activeId) : null
+
+  function handleDragStart(e: DragStartEvent) { setActiveId(e.active.id as string) }
+
+  async function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e
+    setActiveId(null)
+    if (!over) return
+
+    const activeLeadId = active.id as string
+    const overId = over.id as string
+
+    // Destino: puede ser una columna directamente o un lead (en cuya columna cae)
+    const destCol =
+      columns.find(c => c.id === overId) ??
+      columns.find(c => c.leads?.some(l => l.id === overId))
+
+    const srcCol = columns.find(c => c.leads?.some(l => l.id === activeLeadId))
+
+    if (!destCol || !srcCol || srcCol.id === destCol.id) return
+
+    await supabase.from('leads')
+      .update({ column_id: destCol.id, updated_at: new Date().toISOString() })
+      .eq('id', activeLeadId)
+
+    toast.success(`Movido a "${destCol.name}"`)
+    await refetch()
+  }
+
+  async function moveLeadToColumn(leadId: string, toColumnId: string) {
+    const col = columns.find(c => c.id === toColumnId)
+    await supabase.from('leads')
+      .update({ column_id: toColumnId, updated_at: new Date().toISOString() })
+      .eq('id', leadId)
+    toast.success(`Movido a "${col?.name}"`)
+    await refetch()
+  }
+
+  function openAdd(columnId: string) {
+    setTargetColumnId(columnId)
+    setForm(EMPTY)
+    setPasteText('')
+    setGeoStatus('idle')
+    setLatLng(null)
+    setDialog(true)
+  }
+
+  async function handleZoneBlur() {
+    const text = (form.zone || '').trim()
+    if (!text || geoStatus === 'loading') return
+    setGeoStatus('loading')
+    try {
+      const { geocode } = await import('@/lib/geocode')
+      const result = await geocode(text)
+      if (result) {
+        setLatLng({ lat: result.lat, lng: result.lng })
+        setGeoStatus('ok')
+      } else {
+        setGeoStatus('fail')
+      }
+    } catch {
+      setGeoStatus('fail')
+    }
+  }
+
+  function handleSmartPaste() {
+    const parsed = parsePastedText(pasteText)
+    setForm(f => ({ ...f, ...parsed }))
+    toast.success('Datos extraídos')
+  }
+
+  async function handleAISummary() {
+    const rawText = form.notes || pasteText
+    if (!rawText.trim()) { toast.error('Pega o escribe el mensaje del cliente primero'); return }
+    setSummarizing(true)
+    try {
+      const { summarizeLeadText } = await import('@/lib/ai')
+      const summary = await summarizeLeadText({ text: rawText, concept: form.concept, zone: form.zone })
+      setForm(f => ({ ...f, notes: summary }))
+      toast.success('Resumen generado')
+    } catch (err) {
+      toast.error('Error al generar resumen')
+      console.error(err)
+    } finally {
+      setSummarizing(false)
+    }
+  }
+
+  async function handleCreate() {
+    if (!form.name.trim() || !targetColumnId || !boardId) return
+    setSaving(true)
+    try {
+      const { data: newLead } = await supabase.from('leads').insert({
+        board_id: boardId,
+        org_id: organization!.id,
+        column_id: targetColumnId,
+        title: form.name,
+        name: form.name,
+        company: form.company || null,
+        concept: form.concept || null,
+        zone: form.zone || null,
+        phone: form.phone || null,
+        email: form.email || null,
+        source: form.source,
+        notes: form.notes || null,
+        is_read: false,
+        lat: latLng?.lat ?? null,
+        lng: latLng?.lng ?? null,
+      }).select().single()
+
+      // Registrar actividad de creación
+      if (newLead) {
+        await supabase.from('lead_activity').insert({
+          lead_id: newLead.id,
+          user_id: user!.id,
+          action: 'created',
+          metadata: { source: form.source },
+        })
+      }
+
+      toast.success('Lead creado')
+      setDialog(false)
+      await refetch()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al crear lead')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin h-8 w-8 border-4 border-primary-600 border-t-transparent rounded-full" />
+      </div>
+    )
+  }
+
+  return (
+    // Ocupa toda la altura de main (main tiene overflow:hidden + height:0 flex-1)
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+      {/* ── Cabecera del tablero ─────────────────────────────────────────── */}
+      <div
+        className="flex items-center gap-3 shrink-0 bg-white border-b border-gray-200"
+        style={{ padding: '12px 24px' }}
+      >
+        <Button variant="ghost" size="icon" onClick={() => navigate('/boards')}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-base font-bold text-gray-900 truncate">{board?.name ?? 'Tablero'}</h1>
+          <p className="text-xs text-gray-400">
+            {allLeads.length} lead{allLeads.length !== 1 ? 's' : ''} · {columns.length} columnas
+          </p>
+        </div>
+      </div>
+
+      {/* ── Área Kanban: scroll horizontal, columnas con scroll vertical ─── */}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        {/*
+          overflow-x: auto → scroll horizontal del tablero (como Trello)
+          overflow-y: hidden → sin scroll vertical aquí (cada columna tiene el suyo)
+          flex: 1 → ocupa toda la altura restante
+          Se añade padding para dejar margen visual
+        */}
+        <div
+          style={{
+            flex: '1 1 0%',
+            overflowX: 'auto',
+            overflowY: 'hidden',
+            display: 'flex',
+            alignItems: 'stretch',   // columnas estiran a la altura completa
+            gap: 12,
+            padding: '16px 24px 16px 24px',
+            scrollBehavior: 'smooth',
+            WebkitOverflowScrolling: 'touch',  // scroll suave en iOS
+          }}
+        >
+          {columns.map(col => (
+            <KanbanColumn
+              key={col.id}
+              column={col}
+              columns={columns}
+              onLeadClick={lead => navigate(`/leads/${lead.id}`)}
+              onAddLead={openAdd}
+              onMove={moveLeadToColumn}
+            />
+          ))}
+          {/* Espacio final para que la última columna no quede pegada al borde */}
+          <div style={{ width: 8, flexShrink: 0 }} />
+        </div>
+
+        <DragOverlay>
+          {activeLead && (
+            <div className="bg-white rounded-lg border border-primary-300 shadow-2xl p-3 rotate-1" style={{ width: 272 }}>
+              <p className="font-semibold text-sm text-gray-900">{activeLead.name}</p>
+              {activeLead.concept && (
+                <p className="text-xs text-primary-600 mt-0.5">{activeLead.concept}</p>
+              )}
+            </div>
+          )}
+        </DragOverlay>
+      </DndContext>
+
+      {/* Dialog nuevo lead */}
+      <Dialog open={dialog} onOpenChange={setDialog}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Nuevo Lead</DialogTitle></DialogHeader>
+
+          <div className="space-y-4">
+            {/* Smart paste */}
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5">
+                <ClipboardPaste className="h-3.5 w-3.5" />
+                Pegar mensaje del cliente
+              </p>
+              <Textarea
+                rows={3}
+                placeholder="Pega aquí un WhatsApp, email… y pulsa Extraer"
+                value={pasteText}
+                onChange={e => setPasteText(e.target.value)}
+                className="text-xs resize-none"
+              />
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={handleSmartPaste} disabled={!pasteText.trim()} className="flex-1">
+                  Extraer campos
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleAISummary} disabled={summarizing} className="flex-1">
+                  {summarizing ? 'Resumiendo…' : '✨ Resumir con IA'}
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Nombre *</Label>
+                <Input placeholder="Juan García" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Empresa</Label>
+                <Input placeholder="Reformas S.L." value={form.company} onChange={e => setForm(f => ({ ...f, company: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Concepto del trabajo</Label>
+              <Input placeholder="Reforma baño, Cargador eléctrico…" value={form.concept} onChange={e => setForm(f => ({ ...f, concept: e.target.value }))} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Teléfono</Label>
+                <Input placeholder="600 000 000" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Zona / Ciudad</Label>
+                <Input
+                  placeholder="Madrid, León…"
+                  value={form.zone}
+                  onChange={e => { setForm(f => ({ ...f, zone: e.target.value })); setGeoStatus('idle'); setLatLng(null) }}
+                  onBlur={handleZoneBlur}
+                />
+                {geoStatus === 'loading' && (
+                  <p className="text-[11px] text-gray-400 flex items-center gap-1">
+                    <span className="animate-spin inline-block">⏳</span> Geolocalizando…
+                  </p>
+                )}
+                {geoStatus === 'ok' && (
+                  <p className="text-[11px] text-green-600 flex items-center gap-1">📍 Ubicación detectada</p>
+                )}
+                {geoStatus === 'fail' && (
+                  <p className="text-[11px] text-amber-500 flex items-center gap-1">⚠️ No se pudo geolocalizar</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Email</Label>
+                <Input type="email" placeholder="juan@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Origen</Label>
+                <Select value={form.source} onValueChange={v => setForm(f => ({ ...f, source: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="form">Formulario</SelectItem>
+                    <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                    <SelectItem value="call">Llamada</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Trabajo a realizar</Label>
+              <Textarea
+                rows={3}
+                placeholder="Descripción del trabajo: qué quiere el cliente, dimensiones, urgencia…"
+                value={form.notes}
+                onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDialog(false)}>Cancelar</Button>
+              <Button onClick={handleCreate} disabled={saving || !form.name.trim()}>
+                {saving ? 'Guardando…' : 'Crear lead'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
