@@ -1,37 +1,23 @@
 import { useEffect, useState } from 'react'
-import { Building2, Users, TrendingUp, DollarSign, AlertTriangle } from 'lucide-react'
+import { Building2, UserCog, Users, Database, CalendarPlus, AlertCircle, DollarSign } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatCurrency } from '@/lib/utils'
-import { subWeeks, startOfWeek, endOfWeek, format } from 'date-fns'
-import { es } from 'date-fns/locale'
+import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { subWeeks } from 'date-fns'
 
-interface WeekBar { label: string; count: number }
-
-function BarChart({ data }: { data: WeekBar[] }) {
-  const max = Math.max(...data.map(d => d.count), 1)
-  return (
-    <div className="flex items-end gap-2 h-32 pt-4">
-      {data.map((d, i) => (
-        <div key={i} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-          <span className="text-[10px] font-semibold text-gray-500">{d.count || ''}</span>
-          <div
-            className="w-full rounded-t-sm bg-primary-500 transition-all"
-            style={{ height: d.count ? `${Math.max(8, (d.count / max) * 88)}px` : '4px', opacity: d.count ? 1 : 0.2 }}
-          />
-          <span className="text-[9px] text-gray-400 truncate w-full text-center">{d.label}</span>
-        </div>
-      ))}
-    </div>
-  )
+interface ErrorLog {
+  id: string
+  message: string | null
+  url: string | null
+  created_at: string
+  user_email?: string | null
 }
 
 export function SADashboard() {
   const [stats, setStats] = useState({
-    totalOrgs: 0, totalUsers: 0, newThisWeek: 0,
-    totalLeads: 0, mrr: 0, proOrgs: 0, suspended: 0,
+    totalOrgs: 0, owners: 0, collaborators: 0, totalLeads: 0, orgsThisWeek: 0, mrr: 0,
   })
-  const [weekBars, setWeekBars] = useState<WeekBar[]>([])
+  const [logs, setLogs] = useState<ErrorLog[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { loadStats() }, [])
@@ -42,58 +28,71 @@ export function SADashboard() {
 
     const [
       { count: orgs },
-      { count: users },
-      { count: newUsers },
+      { count: owners },
+      { count: collaborators },
       { count: leads },
-      { data: planData },
+      { count: orgsWeek },
+      { data: logData },
+      { data: ownerMembers },
       { data: planCfg },
     ] = await Promise.all([
       supabase.from('organizations').select('*', { count: 'exact', head: true }),
-      supabase.from('profiles').select('*', { count: 'exact', head: true }),
-      supabase.from('profiles').select('*', { count: 'exact', head: true }).gte('created_at', weekAgo),
+      supabase.from('org_members').select('*', { count: 'exact', head: true }).eq('role', 'owner'),
+      supabase.from('org_members').select('*', { count: 'exact', head: true }).neq('role', 'owner'),
       supabase.from('leads').select('*', { count: 'exact', head: true }),
-      supabase.from('organizations').select('plan, plan_status').neq('plan', 'free'),
+      supabase.from('organizations').select('*', { count: 'exact', head: true }).gte('created_at', weekAgo),
+      supabase.from('error_logs').select('id, message, url, created_at, user_id').order('created_at', { ascending: false }).limit(20),
+      supabase.from('org_members').select('user_id').eq('role', 'owner'),
       supabase.from('plan_config').select('plan, price_monthly'),
     ])
 
+    // MRR: sumar el plan de cada usuario owner (distinto), no de orgs
     const priceMap: Record<string, number> = {}
     for (const p of planCfg ?? []) priceMap[p.plan] = p.price_monthly ?? 0
-    const mrr = (planData ?? []).reduce((s, o) => s + (priceMap[o.plan] ?? 0), 0)
-    const suspended = (planData ?? []).filter(o => o.plan_status === 'suspended').length
+    const ownerUserIds = [...new Set((ownerMembers ?? []).map(m => m.user_id))]
+    let mrr = 0
+    if (ownerUserIds.length) {
+      const { data: ownerProfs } = await supabase
+        .from('profiles')
+        .select('plan, plan_status')
+        .in('id', ownerUserIds)
+      mrr = (ownerProfs ?? [])
+        .filter(p => (p.plan_status ?? 'active') === 'active' || p.plan_status === 'trial')
+        .reduce((s, p) => s + (priceMap[p.plan ?? 'free'] ?? 0), 0)
+    }
 
     setStats({
       totalOrgs: orgs ?? 0,
-      totalUsers: users ?? 0,
-      newThisWeek: newUsers ?? 0,
+      owners: owners ?? 0,
+      collaborators: collaborators ?? 0,
       totalLeads: leads ?? 0,
+      orgsThisWeek: orgsWeek ?? 0,
       mrr,
-      proOrgs: (planData ?? []).length,
-      suspended,
     })
 
-    // Barras de las últimas 8 semanas
-    const bars: WeekBar[] = []
-    for (let i = 7; i >= 0; i--) {
-      const weekStart = startOfWeek(subWeeks(new Date(), i), { weekStartsOn: 1 })
-      const weekEnd   = endOfWeek(weekStart, { weekStartsOn: 1 })
-      const { count } = await supabase.from('profiles')
-        .select('*', { count: 'exact', head: true })
-        .gte('created_at', weekStart.toISOString())
-        .lte('created_at', weekEnd.toISOString())
-      bars.push({ label: format(weekStart, 'd MMM', { locale: es }), count: count ?? 0 })
+    // Resolver emails de los usuarios de los logs
+    const rows = logData ?? []
+    const userIds = [...new Set(rows.map(r => r.user_id).filter(Boolean))] as string[]
+    const emailMap: Record<string, string> = {}
+    if (userIds.length) {
+      const { data: profs } = await supabase.from('profiles').select('id, email').in('id', userIds)
+      for (const p of profs ?? []) emailMap[p.id] = p.email
     }
-    setWeekBars(bars)
+    setLogs(rows.map(r => ({
+      id: r.id, message: r.message, url: r.url, created_at: r.created_at,
+      user_email: r.user_id ? emailMap[r.user_id] ?? null : null,
+    })))
+
     setLoading(false)
   }
 
   const STATS = [
-    { label: 'Organizaciones', value: stats.totalOrgs, icon: Building2, color: 'bg-blue-500' },
-    { label: 'Usuarios totales', value: stats.totalUsers, icon: Users, color: 'bg-green-500' },
-    { label: 'MRR estimado', value: formatCurrency(stats.mrr), icon: DollarSign, color: 'bg-amber-500', isCurrency: true },
-    { label: 'Total leads', value: stats.totalLeads, icon: TrendingUp, color: 'bg-indigo-500' },
-    { label: 'Nuevos esta semana', value: stats.newThisWeek, icon: Users, color: 'bg-teal-500' },
-    { label: 'Orgs de pago', value: stats.proOrgs, icon: DollarSign, color: 'bg-purple-500' },
-    { label: 'Suspendidas', value: stats.suspended, icon: AlertTriangle, color: stats.suspended > 0 ? 'bg-red-500' : 'bg-gray-400' },
+    { label: 'Organizaciones',          value: stats.totalOrgs,      icon: Building2,    color: 'bg-blue-500' },
+    { label: 'Usuarios padre (owners)', value: stats.owners,         icon: UserCog,      color: 'bg-indigo-500' },
+    { label: 'Colaboradores (hijos)',   value: stats.collaborators,  icon: Users,        color: 'bg-teal-500' },
+    { label: 'Leads en la plataforma',  value: stats.totalLeads,     icon: Database,     color: 'bg-purple-500' },
+    { label: 'Orgs creadas esta semana',value: stats.orgsThisWeek,   icon: CalendarPlus, color: 'bg-amber-500' },
+    { label: 'MRR estimado',            value: formatCurrency(stats.mrr), icon: DollarSign, color: 'bg-green-500' },
   ]
 
   return (
@@ -104,14 +103,14 @@ export function SADashboard() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
         {STATS.map(s => (
           <Card key={s.label}>
             <CardContent className="p-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-[11px] text-gray-400 leading-tight">{s.label}</p>
-                  <p className={`font-bold mt-0.5 ${s.isCurrency ? 'text-base' : 'text-xl'} text-gray-900`}>
+                  <p className="font-bold mt-0.5 text-xl text-gray-900">
                     {loading ? '…' : s.value}
                   </p>
                 </div>
@@ -124,18 +123,44 @@ export function SADashboard() {
         ))}
       </div>
 
-      {/* Gráfico registros por semana */}
+      {/* Logs de errores */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Nuevos usuarios — últimas 8 semanas</CardTitle>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-red-500" />
+            Últimos errores capturados
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="h-32 flex items-center justify-center">
+            <div className="h-24 flex items-center justify-center">
               <div className="animate-spin h-5 w-5 border-4 border-primary-600 border-t-transparent rounded-full" />
             </div>
+          ) : logs.length === 0 ? (
+            <p className="text-sm text-gray-400 py-6 text-center">Sin errores registrados 🎉</p>
           ) : (
-            <BarChart data={weekBars} />
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase">
+                    <th className="text-left py-2 pr-3 font-medium">Fecha</th>
+                    <th className="text-left py-2 pr-3 font-medium">Mensaje</th>
+                    <th className="text-left py-2 pr-3 font-medium">URL</th>
+                    <th className="text-left py-2 font-medium">Usuario</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {logs.map(l => (
+                    <tr key={l.id} className="hover:bg-gray-50">
+                      <td className="py-2 pr-3 text-xs text-gray-400 whitespace-nowrap">{formatDateTime(l.created_at)}</td>
+                      <td className="py-2 pr-3 text-xs text-red-600 max-w-[360px] truncate" title={l.message ?? ''}>{l.message ?? '—'}</td>
+                      <td className="py-2 pr-3 text-xs text-gray-500 max-w-[200px] truncate" title={l.url ?? ''}>{l.url ?? '—'}</td>
+                      <td className="py-2 text-xs text-gray-500 truncate max-w-[160px]">{l.user_email ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </CardContent>
       </Card>

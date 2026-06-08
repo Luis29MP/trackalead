@@ -3,6 +3,7 @@ import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { MobileNav } from './MobileNav'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
+import { AnnouncementBanner } from '@/components/common/AnnouncementBanner'
 import { useAuth } from '@/context/AuthContext'
 import { Eye } from 'lucide-react'
 
@@ -17,11 +18,14 @@ export function AppLayout() {
 
   function handleExitGhost() {
     exitGhostMode()
-    navigate('/superadmin/organizations')
+    navigate('/superadmin')
   }
 
   return (
     <div className="flex flex-col bg-background" style={{ height: '100dvh', overflow: 'hidden' }}>
+
+      {/* Banner de anuncios globales */}
+      <AnnouncementBanner />
 
       {/* Banner modo fantasma */}
       {isGhostMode && (

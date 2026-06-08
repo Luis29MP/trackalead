@@ -12,6 +12,12 @@ export interface Profile {
   phone: string | null
   system_role: SystemRole
   created_at: string
+  // Suscripción por usuario (owner)
+  plan?: string                 // free, pro, enterprise
+  plan_status?: string          // active, suspended, trial, cancelled, lifetime
+  trial_ends_at?: string | null
+  next_billing_at?: string | null
+  lifetime_since?: string | null
 }
 
 export interface Invitation {
@@ -34,6 +40,10 @@ export interface Organization {
   owner_id: string
   plan: string
   created_at: string
+  plan_status?: string         // active, suspended, trial, cancelled
+  trial_ends_at?: string | null
+  next_billing_at?: string | null
+  suspended_at?: string | null
 }
 
 export interface OrgMember {

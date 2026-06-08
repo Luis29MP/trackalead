@@ -3,6 +3,17 @@ import { supabase } from '@/lib/supabase'
 import type { Board, BoardColumn } from '@/types'
 import { useAuth } from '@/context/AuthContext'
 
+// Columnas estándar de un tablero de captación de leads
+export const STANDARD_COLUMNS: { name: string; color: string }[] = [
+  { name: 'Nuevo lead',    color: '#6B7280' },
+  { name: 'Gestionado',    color: '#3B82F6' },
+  { name: 'Visitado',      color: '#8B5CF6' },
+  { name: 'Presupuestado', color: '#F59E0B' },
+  { name: 'Aceptado',      color: '#10B981' },
+  { name: 'Rechazado',     color: '#EF4444' },
+  { name: 'Finalizado',    color: '#059669' },
+]
+
 export function useBoards() {
   const [boards, setBoards] = useState<Board[]>([])
   const [loading, setLoading] = useState(false)   // false inicial, no bloquea si org es null
@@ -33,7 +44,8 @@ export function useBoards() {
     }
   }
 
-  async function createBoard(board: Partial<Board>) {
+  // columns: lista de columnas a crear. Si no se pasa, usa las estándar.
+  async function createBoard(board: Partial<Board>, columns?: { name: string; color: string }[]) {
     const { data, error } = await supabase
       .from('boards')
       .insert({ ...board, org_id: organization!.id })
@@ -42,18 +54,9 @@ export function useBoards() {
 
     if (error) throw error
 
-    const defaultColumns = [
-      { name: 'Nuevo lead',    position: 0, color: '#6B7280' },
-      { name: 'Gestionado',    position: 1, color: '#3B82F6' },
-      { name: 'Visitado',      position: 2, color: '#8B5CF6' },
-      { name: 'Presupuestado', position: 3, color: '#F59E0B' },
-      { name: 'Aceptado',      position: 4, color: '#10B981' },
-      { name: 'Rechazado',     position: 5, color: '#EF4444' },
-      { name: 'Finalizado',    position: 6, color: '#059669' },
-    ]
-
+    const cols = columns && columns.length > 0 ? columns : STANDARD_COLUMNS
     await supabase.from('board_columns').insert(
-      defaultColumns.map((col) => ({ ...col, board_id: data.id }))
+      cols.map((col, i) => ({ name: col.name, color: col.color, position: i, board_id: data.id }))
     )
 
     await loadBoards()

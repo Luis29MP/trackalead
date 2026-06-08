@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, LayoutGrid, Map, Calendar, DollarSign,
   HardHat, Users, Bell, Settings, LogOut, Radar,
-  ChevronDown, Check, Building2, Shield,
+  ChevronDown, Check, Building2, Shield, Star,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
@@ -25,9 +25,10 @@ const NAV_ITEMS = [
 ]
 
 function OrgSwitcher() {
-  const { organization, session, refreshOrganization } = useAuth()
+  const { organization, session, profile } = useAuth()
   const [orgs, setOrgs] = useState<Organization[]>([])
   const [open, setOpen] = useState(false)
+  const isLifetime = profile?.plan_status === 'lifetime'
 
   useEffect(() => {
     if (!session) return
@@ -53,8 +54,11 @@ function OrgSwitcher() {
             {organization.name.charAt(0).toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-white text-xs font-semibold truncate">{organization.name}</p>
-            <p className="text-slate-600 text-[10px] truncate">{organization.name}</p>
+            <p className="text-white text-xs font-semibold truncate flex items-center gap-1">
+              <span className="truncate">{organization.name}</span>
+              {isLifetime && <Star className="h-3 w-3 text-amber-400 fill-amber-400 shrink-0" />}
+            </p>
+            <p className="text-slate-600 text-[10px] truncate">{isLifetime ? 'Lifetime ⭐' : organization.name}</p>
           </div>
         </div>
       </div>
@@ -71,8 +75,11 @@ function OrgSwitcher() {
           {organization?.name?.charAt(0).toUpperCase() ?? 'O'}
         </div>
         <div className="flex-1 min-w-0 text-left">
-          <p className="text-white text-xs font-semibold truncate">{organization?.name ?? '…'}</p>
-          <p className="text-slate-600 text-[10px] truncate">{organization?.name ?? '…'}</p>
+          <p className="text-white text-xs font-semibold truncate flex items-center gap-1">
+            <span className="truncate">{organization?.name ?? '…'}</span>
+            {isLifetime && <Star className="h-3 w-3 text-amber-400 fill-amber-400 shrink-0" />}
+          </p>
+          <p className="text-slate-600 text-[10px] truncate">{isLifetime ? 'Lifetime ⭐' : (organization?.name ?? '…')}</p>
         </div>
         <ChevronDown className={cn('h-3 w-3 text-slate-400 transition-transform shrink-0', open && 'rotate-180')} />
       </button>

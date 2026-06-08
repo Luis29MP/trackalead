@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
+import { setErrorLogContext } from '@/lib/errorLog'
 import type { Organization, Profile } from '@/types'
 
 interface AuthContextValue {
@@ -31,9 +32,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile]           = useState<Profile | null>(null)
   const [organization, setOrganization] = useState<Organization | null>(null)
   const [ghostOrg, setGhostOrg]         = useState<Organization | null>(() => {
-    // Restaurar ghost mode si estaba activo antes de recargar la página
-    const id   = localStorage.getItem('ghost_org_id')
-    const name = localStorage.getItem('ghost_org_name')
+    // Restaurar ghost mode si estaba activo antes de recargar la página (sessionStorage)
+    const id   = sessionStorage.getItem('ghost_org_id')
+    const name = sessionStorage.getItem('ghost_org_name')
     if (id && name) return { id, name, owner_id: '', plan: '', created_at: '' } as Organization
     return null
   })
@@ -65,6 +66,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => { subscription.unsubscribe(); clearTimeout(timeoutRef.current!) }
   }, [])
+
+  // Mantener el contexto de logs de errores con el usuario y la org reales
+  useEffect(() => {
+    setErrorLogContext(session?.user.id ?? null, organization?.id ?? null)
+  }, [session?.user.id, organization?.id])
 
   async function loadUserData(userId: string) {
     try {
@@ -152,14 +158,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   function enterGhostMode(org: Organization) {
-    localStorage.setItem('ghost_org_id', org.id)
-    localStorage.setItem('ghost_org_name', org.name)
+    sessionStorage.setItem('ghost_org_id', org.id)
+    sessionStorage.setItem('ghost_org_name', org.name)
     setGhostOrg(org)
   }
 
   function exitGhostMode() {
-    localStorage.removeItem('ghost_org_id')
-    localStorage.removeItem('ghost_org_name')
+    sessionStorage.removeItem('ghost_org_id')
+    sessionStorage.removeItem('ghost_org_name')
     setGhostOrg(null)
   }
 

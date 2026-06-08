@@ -19,7 +19,12 @@ import { Settings } from '@/pages/Settings'
 import { PublicLeadView } from '@/pages/PublicLeadView'
 import { ProPanel } from '@/pages/ProPanel'
 import { AcceptInvite } from '@/pages/AcceptInvite'
-import { SuperAdmin } from '@/pages/SuperAdmin'
+import { AdminLayout } from '@/components/layout/AdminLayout'
+import { SADashboard } from '@/pages/superadmin/SADashboard'
+import { SAOrganizations } from '@/pages/superadmin/SAOrganizations'
+import { SABilling } from '@/pages/superadmin/SABilling'
+import { SACommunications } from '@/pages/superadmin/SACommunications'
+import { SAPlans } from '@/pages/superadmin/SAPlans'
 
 function Spinner() {
   return (
@@ -135,16 +140,20 @@ function AppRoutes() {
         <Route path="/settings"      element={<Settings />} />
       </Route>
 
-      {/* Super Admin — ruta independiente con su propio guard */}
+      {/* Super Admin — layout propio (AdminLayout) con su guard */}
       <Route
         path="/superadmin"
         element={
           <SuperAdminRoute>
-            <AppLayout />
+            <AdminLayout />
           </SuperAdminRoute>
         }
       >
-        <Route index element={<SuperAdmin />} />
+        <Route index                element={<SADashboard />} />
+        <Route path="organizations" element={<SAOrganizations />} />
+        <Route path="billing"       element={<SABilling />} />
+        <Route path="communications" element={<SACommunications />} />
+        <Route path="plans"         element={<SAPlans />} />
       </Route>
 
       <Route path="/" element={<DefaultRedirect />} />

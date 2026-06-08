@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Globe, Layers } from 'lucide-react'
+import { Plus, Globe, Layers, Check } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
-import { useBoards } from '@/hooks/useBoards'
+import { useBoards, STANDARD_COLUMNS } from '@/hooks/useBoards'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -29,16 +29,37 @@ export function Boards() {
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [selectedColor, setSelectedColor] = useState(BOARD_COLORS[0])
+  const [preset, setPreset] = useState<'standard' | 'empty' | 'custom'>('standard')
+  const [customCols, setCustomCols] = useState<Set<string>>(() => new Set(STANDARD_COLUMNS.map(c => c.name)))
   const navigate = useNavigate()
   const form = useForm<BoardFormData>({ defaultValues: { color: BOARD_COLORS[0] } })
+
+  function toggleCustomCol(name: string) {
+    setCustomCols(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name); else next.add(name)
+      return next
+    })
+  }
 
   async function handleCreate(data: BoardFormData) {
     setCreating(true)
     try {
-      const board = await createBoard({ ...data, color: selectedColor })
+      let cols: { name: string; color: string }[]
+      if (preset === 'standard') {
+        cols = STANDARD_COLUMNS
+      } else if (preset === 'empty') {
+        cols = [{ name: 'Nuevo lead', color: '#6B7280' }]
+      } else {
+        cols = STANDARD_COLUMNS.filter(c => customCols.has(c.name))
+        if (cols.length === 0) cols = [{ name: 'Nuevo lead', color: '#6B7280' }]
+      }
+      const board = await createBoard({ ...data, color: selectedColor }, cols)
       toast.success('Tablero creado')
       setOpen(false)
       form.reset()
+      setPreset('standard')
+      setCustomCols(new Set(STANDARD_COLUMNS.map(c => c.name)))
       navigate(`/boards/${board.id}`)
     } catch {
       toast.error('Error al crear tablero')
@@ -104,6 +125,54 @@ export function Boards() {
                   ))}
                 </div>
               </div>
+              {/* Columnas iniciales */}
+              <div className="space-y-2">
+                <Label>Columnas del tablero</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { key: 'standard', label: 'Estándar', desc: '7 columnas' },
+                    { key: 'empty',    label: 'Vacío',    desc: 'Solo "Nuevo lead"' },
+                    { key: 'custom',   label: 'Personalizar', desc: 'Elige cuáles' },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setPreset(opt.key)}
+                      className={`text-left rounded-lg border p-2.5 transition-colors ${
+                        preset === opt.key
+                          ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <p className="text-xs font-semibold text-gray-800">{opt.label}</p>
+                      <p className="text-[11px] text-gray-400 leading-tight">{opt.desc}</p>
+                    </button>
+                  ))}
+                </div>
+
+                {preset === 'custom' && (
+                  <div className="border border-gray-100 rounded-lg p-2 space-y-1 mt-1">
+                    {STANDARD_COLUMNS.map(col => {
+                      const checked = customCols.has(col.name)
+                      return (
+                        <button
+                          key={col.name}
+                          type="button"
+                          onClick={() => toggleCustomCol(col.name)}
+                          className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-gray-50 transition-colors"
+                        >
+                          <span className={`w-4 h-4 rounded flex items-center justify-center border ${checked ? 'bg-primary-600 border-primary-600' : 'border-gray-300'}`}>
+                            {checked && <Check className="h-3 w-3 text-white" />}
+                          </span>
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: col.color }} />
+                          <span className="text-xs text-gray-700">{col.name}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
                 <Button type="submit" disabled={creating}>

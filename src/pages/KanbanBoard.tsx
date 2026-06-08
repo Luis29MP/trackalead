@@ -13,7 +13,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import {
   Plus, ArrowLeft, Wrench, MapPin, ChevronLeft, ChevronRight,
-  ClipboardPaste, Calendar,
+  ClipboardPaste, Calendar, Settings2, Trash2, ArrowUp, ArrowDown, Save,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBoardColumns } from '@/hooks/useBoards'
@@ -144,11 +144,10 @@ function LeadCard({ lead, columns, onClick, onMove }: {
 // - Ancho fijo 272px (flex-shrink:0)
 // - Altura = 100% del contenedor padre (que ocupa toda la altura disponible)
 // - Scroll vertical sólo en el área de tarjetas
-function KanbanColumn({ column, columns, onLeadClick, onAddLead, onMove }: {
+function KanbanColumn({ column, columns, onLeadClick, onMove }: {
   column: BoardColumn
   columns: BoardColumn[]
   onLeadClick: (l: Lead) => void
-  onAddLead: (id: string) => void
   onMove: (leadId: string, toColumnId: string) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id })
@@ -169,9 +168,6 @@ function KanbanColumn({ column, columns, onLeadClick, onAddLead, onMove }: {
             {column.leads?.length ?? 0}
           </span>
         </div>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onAddLead(column.id)}>
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
       </div>
 
       {/* Zona de drop: ocupa el resto de la altura, scroll vertical */}
@@ -209,6 +205,156 @@ interface NewLeadForm {
 }
 const EMPTY: NewLeadForm = { name: '', company: '', concept: '', zone: '', phone: '', email: '', source: 'form', notes: '' }
 
+// ── Gestionar listas ────────────────────────────────────────────────────────────────
+const COLUMN_PALETTE = ['#6B7280', '#3B82F6', '#8B5CF6', '#F59E0B', '#10B981', '#EF4444', '#059669', '#0EA5E9', '#EC4899', '#84CC16']
+
+function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-6 h-6 rounded-full border border-gray-300"
+        style={{ backgroundColor: value }}
+        title="Cambiar color"
+      />
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute z-50 top-7 left-0 bg-white border border-gray-200 rounded-lg shadow-lg p-2 grid grid-cols-5 gap-1.5 w-max">
+            {COLUMN_PALETTE.map(c => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => { onChange(c); setOpen(false) }}
+                className="w-5 h-5 rounded-full hover:scale-110 transition-transform"
+                style={{ backgroundColor: c, outline: value === c ? `2px solid ${c}` : undefined, outlineOffset: 1 }}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+interface EditCol { id: string; name: string; color: string; leadCount: number; isNew?: boolean }
+
+function ManageColumnsDialog({ open, onOpenChange, boardId, columns, onSaved }: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  boardId: string
+  columns: BoardColumn[]
+  onSaved: () => Promise<void> | void
+}) {
+  const [cols, setCols] = useState<EditCol[]>([])
+  const [deletedIds, setDeletedIds] = useState<string[]>([])
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      setCols(columns.map(c => ({ id: c.id, name: c.name, color: c.color, leadCount: c.leads?.length ?? 0 })))
+      setDeletedIds([])
+    }
+  }, [open, columns])
+
+  function update(id: string, patch: Partial<EditCol>) {
+    setCols(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c))
+  }
+  function move(idx: number, dir: -1 | 1) {
+    setCols(prev => {
+      const j = idx + dir
+      if (j < 0 || j >= prev.length) return prev
+      const next = [...prev]
+      ;[next[idx], next[j]] = [next[j], next[idx]]
+      return next
+    })
+  }
+  function addCol() {
+    setCols(prev => [...prev, {
+      id: `new-${Date.now()}`, name: 'Nueva lista',
+      color: COLUMN_PALETTE[prev.length % COLUMN_PALETTE.length], leadCount: 0, isNew: true,
+    }])
+  }
+  function removeCol(col: EditCol) {
+    if (col.leadCount > 0) return
+    if (!col.isNew) setDeletedIds(prev => [...prev, col.id])
+    setCols(prev => prev.filter(c => c.id !== col.id))
+  }
+
+  async function save() {
+    if (cols.length === 0) { toast.error('Debe haber al menos una lista'); return }
+    if (cols.some(c => !c.name.trim())) { toast.error('Las listas no pueden tener nombre vacío'); return }
+    setSaving(true)
+    try {
+      for (const id of deletedIds) {
+        await supabase.from('board_columns').delete().eq('id', id)
+      }
+      for (let i = 0; i < cols.length; i++) {
+        const c = cols[i]
+        if (c.isNew) {
+          await supabase.from('board_columns').insert({ board_id: boardId, name: c.name.trim(), color: c.color, position: i })
+        } else {
+          await supabase.from('board_columns').update({ name: c.name.trim(), color: c.color, position: i }).eq('id', c.id)
+        }
+      }
+      toast.success('Listas actualizadas')
+      await onSaved()
+      onOpenChange(false)
+    } catch (err) {
+      toast.error('Error al guardar las listas')
+      console.error(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Gestionar listas</DialogTitle></DialogHeader>
+        <div className="space-y-2">
+          {cols.map((col, idx) => (
+            <div key={col.id} className="flex items-center gap-2 bg-gray-50 rounded-lg p-2">
+              <div className="flex flex-col">
+                <button onClick={() => move(idx, -1)} disabled={idx === 0} className="text-gray-400 hover:text-gray-700 disabled:opacity-30" title="Subir">
+                  <ArrowUp className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={() => move(idx, 1)} disabled={idx === cols.length - 1} className="text-gray-400 hover:text-gray-700 disabled:opacity-30" title="Bajar">
+                  <ArrowDown className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <ColorPicker value={col.color} onChange={c => update(col.id, { color: c })} />
+              <Input value={col.name} onChange={e => update(col.id, { name: e.target.value })} className="h-8 text-sm flex-1" />
+              <span className="text-[11px] text-gray-400 w-14 text-center shrink-0">{col.leadCount} lead{col.leadCount !== 1 ? 's' : ''}</span>
+              <button
+                onClick={() => removeCol(col)}
+                disabled={col.leadCount > 0}
+                title={col.leadCount > 0 ? 'Mueve los leads antes de eliminar' : 'Eliminar lista'}
+                className="text-red-400 hover:text-red-600 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+
+          <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={addCol}>
+            <Plus className="h-3.5 w-3.5" /> Añadir lista
+          </Button>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+            <Button onClick={save} disabled={saving} className="gap-1.5">
+              <Save className="h-4 w-4" />{saving ? 'Guardando…' : 'Guardar cambios'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────────
 export function KanbanBoard() {
   const { id: boardId } = useParams<{ id: string }>()
@@ -225,6 +371,9 @@ export function KanbanBoard() {
   const [summarizing, setSummarizing] = useState(false)
   const [geoStatus, setGeoStatus] = useState<'idle' | 'loading' | 'ok' | 'fail'>('idle')
   const [latLng, setLatLng] = useState<{ lat: number; lng: number } | null>(null)
+  const [manageOpen, setManageOpen] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -282,6 +431,22 @@ export function KanbanBoard() {
     setGeoStatus('idle')
     setLatLng(null)
     setDialog(true)
+  }
+
+  // Siempre crea en la primera columna (position 0, normalmente "Nuevo lead")
+  function handleNewLead() {
+    const first = columns[0]
+    if (!first) { toast.error('Crea una lista primero'); return }
+    openAdd(first.id)
+  }
+
+  async function saveName() {
+    setEditingName(false)
+    const name = nameInput.trim()
+    if (!board || !name || name === board.name) return
+    await supabase.from('boards').update({ name }).eq('id', board.id)
+    setBoard({ ...board, name })
+    toast.success('Tablero renombrado')
   }
 
   async function handleZoneBlur() {
@@ -388,11 +553,38 @@ export function KanbanBoard() {
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-base font-bold text-gray-900 truncate">{board?.name ?? 'Tablero'}</h1>
+          {editingName ? (
+            <input
+              autoFocus
+              value={nameInput}
+              onChange={e => setNameInput(e.target.value)}
+              onBlur={saveName}
+              onKeyDown={e => {
+                if (e.key === 'Enter') saveName()
+                if (e.key === 'Escape') setEditingName(false)
+              }}
+              className="text-base font-bold text-gray-900 border-b-2 border-primary-400 outline-none bg-transparent w-full max-w-sm"
+            />
+          ) : (
+            <h1
+              className="text-base font-bold text-gray-900 truncate cursor-pointer hover:text-primary-600 transition-colors inline-block max-w-full"
+              title="Click para renombrar"
+              onClick={() => { setNameInput(board?.name ?? ''); setEditingName(true) }}
+            >
+              {board?.name ?? 'Tablero'}
+            </h1>
+          )}
           <p className="text-xs text-gray-400">
             {allLeads.length} lead{allLeads.length !== 1 ? 's' : ''} · {columns.length} columnas
           </p>
         </div>
+
+        <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => setManageOpen(true)}>
+          <Settings2 className="h-4 w-4" /> Gestionar listas
+        </Button>
+        <Button size="sm" className="gap-1.5 shrink-0 bg-primary-600 hover:bg-primary-700" onClick={handleNewLead}>
+          <Plus className="h-4 w-4" /> Nuevo lead
+        </Button>
       </div>
 
       {/* ── Área Kanban: scroll horizontal, columnas con scroll vertical ─── */}
@@ -427,7 +619,6 @@ export function KanbanBoard() {
               column={col}
               columns={columns}
               onLeadClick={lead => navigate(`/leads/${lead.id}`)}
-              onAddLead={openAdd}
               onMove={moveLeadToColumn}
             />
           ))}
@@ -446,6 +637,15 @@ export function KanbanBoard() {
           )}
         </DragOverlay>
       </DndContext>
+
+      {/* Dialog gestionar listas */}
+      <ManageColumnsDialog
+        open={manageOpen}
+        onOpenChange={setManageOpen}
+        boardId={boardId!}
+        columns={columns}
+        onSaved={refetch}
+      />
 
       {/* Dialog nuevo lead */}
       <Dialog open={dialog} onOpenChange={setDialog}>

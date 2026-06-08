@@ -15,10 +15,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import {
-  User, Building2, Lock, Globe, Link, Copy, Check,
-  Crown, Shield, Trash2, Plus, Users,
+  User, Building2, Lock, Globe, Link, Check,
+  Trash2, Plus, Users, Star, CreditCard,
 } from 'lucide-react'
-import { getInitials } from '@/lib/utils'
+import { getInitials, formatDate } from '@/lib/utils'
 import type { OrgMember, Profile, UserRole } from '@/types'
 
 const ROLE_LABEL: Record<string, string> = {
@@ -170,6 +170,7 @@ export function Settings() {
       <Tabs defaultValue="org">
         <TabsList className="mb-6">
           <TabsTrigger value="org"><Building2 className="h-3.5 w-3.5 mr-1.5" />Organización</TabsTrigger>
+          <TabsTrigger value="subscription"><CreditCard className="h-3.5 w-3.5 mr-1.5" />Suscripción</TabsTrigger>
           <TabsTrigger value="profile"><User className="h-3.5 w-3.5 mr-1.5" />Perfil</TabsTrigger>
           <TabsTrigger value="security"><Lock className="h-3.5 w-3.5 mr-1.5" />Seguridad</TabsTrigger>
           <TabsTrigger value="api"><Globe className="h-3.5 w-3.5 mr-1.5" />API</TabsTrigger>
@@ -319,6 +320,61 @@ export function Settings() {
                   <Trash2 className="h-4 w-4" />
                   Eliminar organización
                 </Button>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* ── SUSCRIPCIÓN ──────────────────────────────────────────────────── */}
+        <TabsContent value="subscription" className="space-y-5">
+          {profile?.plan_status === 'lifetime' ? (
+            <Card className="border-2 border-amber-300 overflow-hidden">
+              <div className="bg-gradient-to-r from-amber-400 to-yellow-500 px-6 py-5 text-white">
+                <div className="flex items-center gap-3">
+                  <Star className="h-8 w-8 fill-white" />
+                  <div>
+                    <p className="text-xl font-bold flex items-center gap-2">⭐ LIFETIME</p>
+                    <p className="text-sm text-white/90">TrackALead {(profile.plan ?? 'pro').toUpperCase()}</p>
+                  </div>
+                </div>
+              </div>
+              <CardContent className="p-6 space-y-3">
+                <p className="text-sm text-gray-700">
+                  Acceso de por vida a <strong>TrackALead {(profile.plan ?? 'pro').toUpperCase()}</strong>. Sin pagos recurrentes.
+                </p>
+                {profile.lifetime_since && (
+                  <p className="text-xs text-gray-400">
+                    Lifetime activo desde el <strong className="text-gray-600">{formatDate(profile.lifetime_since)}</strong>
+                  </p>
+                )}
+                <div className="flex items-center gap-2 text-xs text-green-600 bg-green-50 rounded-lg px-3 py-2 w-fit">
+                  <Check className="h-3.5 w-3.5" />
+                  Nunca volverás a pagar por TrackALead
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader className="pb-3"><CardTitle className="text-sm">Tu plan actual</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-lg font-bold text-gray-900 uppercase">{profile?.plan ?? 'free'}</p>
+                    <p className="text-xs text-gray-400">
+                      Estado: {profile?.plan_status === 'trial' ? 'En prueba' : profile?.plan_status === 'suspended' ? 'Suspendido' : 'Activo'}
+                    </p>
+                  </div>
+                  <Badge className="text-xs uppercase">{profile?.plan ?? 'free'}</Badge>
+                </div>
+                {profile?.next_billing_at && (
+                  <p className="text-xs text-gray-400">
+                    Próximo pago: <strong className="text-gray-600">{formatDate(profile.next_billing_at)}</strong>
+                  </p>
+                )}
+                <Separator />
+                <p className="text-xs text-gray-400">
+                  Para cambiar de plan, contacta con nosotros. Próximamente podrás actualizar tu plan desde aquí.
+                </p>
               </CardContent>
             </Card>
           )}
