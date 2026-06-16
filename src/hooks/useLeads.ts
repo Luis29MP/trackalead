@@ -3,29 +3,15 @@ import { supabase } from '@/lib/supabase'
 import type { Lead } from '@/types'
 import { useAuth } from '@/context/AuthContext'
 
-// Columnas seguras: solo las que SIEMPRE existen en el schema inicial
 const LEAD_SELECT = `
-  id, board_id, org_id, column_id, title, name, phone, email,
-  address, lat, lng, source, notes, ai_summary, assigned_to,
-  budget_amount, commission_amount, commission_paid, is_archived,
+  id, board_id, org_id, column_id, title, name, company, concept, zone,
+  phone, email, address, lat, lng, source, notes, ai_summary, assigned_to,
+  is_read, public_token, budget_amount, commission_amount, commission_paid, is_archived,
   created_at, updated_at,
   column:board_columns(id, name, color, position),
   board:boards(id, name, color),
   assigned_professional:professionals(id, name, specialty, phone, email)
 `.replace(/\s+/g, ' ').trim()
-
-// Columnas opcionales que pueden no existir todavía (migración pendiente)
-async function enrichLead(lead: Lead): Promise<Lead> {
-  try {
-    const { data } = await supabase
-      .from('leads')
-      .select('company, concept, zone, is_read, public_token')
-      .eq('id', lead.id)
-      .maybeSingle()
-    if (data) return { ...lead, ...data }
-  } catch { /* columnas no existen aún — silencioso */ }
-  return lead
-}
 
 export function useLeads(boardId?: string) {
   const [leads, setLeads] = useState<Lead[]>([])
@@ -84,13 +70,7 @@ export function useLead(leadId: string) {
         .maybeSingle()
 
       if (error) throw error
-
-      if (data) {
-        const enriched = await enrichLead(data as unknown as Lead)
-        setLead(enriched)
-      } else {
-        setLead(null)
-      }
+      setLead(data ? (data as unknown as Lead) : null)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error('[useLead] error:', msg)
