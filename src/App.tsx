@@ -23,6 +23,7 @@ import { AcceptInvite } from '@/pages/AcceptInvite'
 import { AdminLayout } from '@/components/layout/AdminLayout'
 import { SADashboard } from '@/pages/superadmin/SADashboard'
 import { SAOrganizations } from '@/pages/superadmin/SAOrganizations'
+import { SATrash } from '@/pages/superadmin/SATrash'
 import { SABilling } from '@/pages/superadmin/SABilling'
 import { SACommunications } from '@/pages/superadmin/SACommunications'
 import { SAPlans } from '@/pages/superadmin/SAPlans'
@@ -153,6 +154,7 @@ function AppRoutes() {
       >
         <Route index                element={<SADashboard />} />
         <Route path="organizations" element={<SAOrganizations />} />
+        <Route path="trash"         element={<SATrash />} />
         <Route path="billing"       element={<SABilling />} />
         <Route path="communications" element={<SACommunications />} />
         <Route path="plans"         element={<SAPlans />} />

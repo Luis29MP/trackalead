@@ -1,6 +1,7 @@
 import { useEffect, useState, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Eye, Filter, Layers, Users, ChevronDown, ChevronRight, UserCog, Building2 } from 'lucide-react'
+import { Eye, Filter, Layers, Users, ChevronDown, ChevronRight, UserCog, Building2, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { Input } from '@/components/ui/input'
@@ -49,7 +50,7 @@ export function SAOrganizations() {
   const [search, setSearch]     = useState('')
   const [filterPlan, setFilterPlan] = useState('all')
   const [expandedOrg, setExpandedOrg] = useState<string | null>(null)
-  const { enterGhostMode } = useAuth()
+  const { enterGhostMode, user } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => { loadOrgs() }, [])
@@ -70,7 +71,10 @@ export function SAOrganizations() {
 
   async function loadOrgs() {
     setLoading(true)
-    const { data: orgsData } = await supabase.from('organizations').select('id, name, owner_id, created_at').order('created_at', { ascending: false })
+    const { data: orgsData } = await supabase.from('organizations')
+      .select('id, name, owner_id, created_at')
+      .is('deleted_at', null)   // solo organizaciones activas (las de la papelera van en /superadmin/trash)
+      .order('created_at', { ascending: false })
     if (!orgsData) { setLoading(false); return }
 
     // Perfiles de los owners
@@ -134,6 +138,19 @@ export function SAOrganizations() {
   function handleGhostMode(org: OrgItem, ownerId: string) {
     enterGhostMode({ id: org.id, name: org.name, owner_id: ownerId, plan: '', created_at: org.created_at })
     navigate('/dashboard')
+  }
+
+  async function moveToTrash(org: OrgItem) {
+    if (!window.confirm(`¿Mover "${org.name}" a la papelera?\n\nEl propietario y sus colaboradores perderán el acceso de inmediato. Podrás restaurarla o eliminarla definitivamente desde la Papelera.`)) return
+    const { error } = await supabase.from('organizations')
+      .update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null })
+      .eq('id', org.id)
+    if (error) { toast.error('No se pudo mover a la papelera'); return }
+    toast.success(`"${org.name}" movida a la papelera`)
+    // Quitar de la vista (y eliminar grupos de owner que se queden vacíos)
+    setGroups(prev => prev
+      .map(g => ({ ...g, orgs: g.orgs.filter(o => o.id !== org.id) }))
+      .filter(g => g.orgs.length > 0))
   }
 
   const totalOrgs = groups.reduce((s, g) => s + g.orgs.length, 0)
@@ -225,14 +242,23 @@ export function SAOrganizations() {
                         <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">
                           {org.last_activity ? `Activa ${formatDateTime(org.last_activity)}` : 'Sin actividad'}
                         </td>
-                        <td className="px-4 py-2.5 text-center w-12">
-                          <button
-                            onClick={() => handleGhostMode(org, group.owner_id)}
-                            className="p-1.5 rounded hover:bg-amber-100 text-amber-500 hover:text-amber-700 transition-colors"
-                            title="Entrar en modo fantasma"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </button>
+                        <td className="px-4 py-2.5 text-center w-20">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => handleGhostMode(org, group.owner_id)}
+                              className="p-1.5 rounded hover:bg-amber-100 text-amber-500 hover:text-amber-700 transition-colors"
+                              title="Entrar en modo fantasma"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => moveToTrash(org)}
+                              className="p-1.5 rounded hover:bg-red-100 text-gray-400 hover:text-red-600 transition-colors"
+                              title="Mover a la papelera"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
 

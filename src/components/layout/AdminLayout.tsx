@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Building2, CreditCard, Megaphone, Settings, LogOut, Shield, Radar } from 'lucide-react'
+import { LayoutDashboard, Building2, CreditCard, Megaphone, Settings, LogOut, Shield, Radar, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
@@ -7,6 +7,7 @@ import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 const ADMIN_NAV = [
   { to: '/superadmin',               icon: LayoutDashboard, label: 'Dashboard',        end: true },
   { to: '/superadmin/organizations', icon: Building2,       label: 'Organizaciones'   },
+  { to: '/superadmin/trash',         icon: Trash2,          label: 'Papelera'         },
   { to: '/superadmin/billing',       icon: CreditCard,      label: 'Suscripciones'    },
   { to: '/superadmin/communications',icon: Megaphone,       label: 'Comunicaciones'   },
   { to: '/superadmin/plans',         icon: Settings,        label: 'Configuración'    },
