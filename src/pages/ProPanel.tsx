@@ -71,39 +71,36 @@ export function ProPanel() {
 
   async function loadProfessional() {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('professionals').select('*').eq('magic_token', token).eq('app_access', true).maybeSingle()
-    if (error || !data) { setNotFound(true); setLoading(false); return }
-    setProfessional(data)
-    setRates(data.rates ?? [])
-
-    // Dueño de la organización (para usar sus claves de IA al generar)
-    const { data: org } = await supabase.from('organizations').select('owner_id').eq('id', data.org_id).maybeSingle()
-    setOwnerId(org?.owner_id ?? null)
-
-    // Actualizar last_access
-    await supabase.from('professionals').update({ last_access: new Date().toISOString() }).eq('id', data.id)
-
-    // Cargar leads asignados
-    const { data: leadsData } = await supabase
-      .from('leads')
-      .select('*, column:board_columns(id,name,color), board:boards(id,name,color)')
-      .eq('assigned_to', data.id)
-      .eq('is_archived', false)
-      .order('created_at', { ascending: false })
-    setLeads((leadsData ?? []) as PanelLead[])
-
-    await loadPartidas(data.id)
+    const ok = await reload()
+    if (!ok) setNotFound(true)
     setLoading(false)
   }
 
-  async function loadPartidas(proId: string) {
-    const { data } = await supabase
-      .from('budget_partidas')
-      .select('*, budget:budgets(client_name, concept, lead_id, vat_percent)')
-      .eq('professional_id', proId)
-      .order('created_at', { ascending: false })
-    setPartidas((data ?? []) as PanelPartida[])
+  // Carga TODO vía RPC SECURITY DEFINER (valida el token y devuelve solo lo del profesional)
+  async function reload(): Promise<boolean> {
+    const { data, error } = await supabase.rpc('pro_load', { p_token: token })
+    if (error || !data) return false
+    const d = data as { professional: Professional; owner_id: string | null; leads: PanelLead[]; partidas: PanelPartida[] }
+    setProfessional(d.professional)
+    setRates(d.professional.rates ?? [])
+    setOwnerId(d.owner_id ?? null)
+    setLeads(d.leads ?? [])
+    setPartidas(d.partidas ?? [])
+    return true
+  }
+
+  // Texto de conocimiento del profesional (vía RPC, sin sesión)
+  async function proKnowledgeText(): Promise<string> {
+    const { data } = await supabase.rpc('pro_knowledge_list', { p_token: token })
+    const items = (data ?? []) as { type: string; title: string | null; content_text: string | null }[]
+    let out = ''
+    for (const k of items) {
+      if (!k.content_text) continue
+      const chunk = `\n--- ${k.type}: ${k.title ?? ''} ---\n${k.content_text.slice(0, 2500)}`
+      if (out.length + chunk.length > 8000) break
+      out += chunk
+    }
+    return out.trim()
   }
 
   function openPartida(p: PanelPartida) {
@@ -127,7 +124,7 @@ export function ProPanel() {
   async function saveRates() {
     if (!professional) return
     setSavingRates(true)
-    const { error } = await supabase.from('professionals').update({ rates }).eq('id', professional.id)
+    const { error } = await supabase.rpc('pro_rates_save', { p_token: token, p_rates: rates })
     setSavingRates(false)
     if (error) toast.error('Error al guardar'); else { toast.success('Tarifas guardadas'); setProfessional({ ...professional, rates }) }
   }
@@ -138,8 +135,7 @@ export function ProPanel() {
     setGeneratingBudget(true)
     try {
       const client = lead.name.replace(/^nombre:\s*/i, '').trim() || 'Cliente'
-      const { fetchProKnowledgeText } = await import('@/lib/proKnowledge')
-      const knowledge = await fetchProKnowledgeText(professional.id)
+      const knowledge = await proKnowledgeText()
       const result = await generateBudget({
         clientName: client,
         concept: lead.concept || lead.notes || 'Trabajo',
@@ -154,32 +150,16 @@ export function ProPanel() {
       const vatAmount = Math.round(subtotal * 21) / 100
       const total = Math.round((subtotal + vatAmount) * 100) / 100
 
-      const { data: budget } = await supabase.from('budgets').insert({
-        org_id: lead.org_id, lead_id: lead.id, professional_id: professional.id,
-        client_name: client, client_phone: lead.phone || null, client_address: lead.address || null,
-        concept: lead.concept || null, lines: result.lines, subtotal,
-        vat_percent: 21, vat_amount: vatAmount, total,
-        margin_percent: 20, validity_days: 30, notes: result.notes || null,
-        status: 'draft', ai_generated: true,
-      }).select().single()
-
-      if (budget) {
-        await supabase.from('budget_partidas').insert({
-          budget_id: budget.id, org_id: lead.org_id, trade: lead.concept || 'General',
-          professional_id: professional.id, lines: result.lines, subtotal, status: 'pending',
-        })
-        const { data: members } = await supabase.from('org_members').select('user_id').eq('org_id', lead.org_id)
-        for (const m of members ?? []) {
-          await supabase.from('notifications').insert({
-            user_id: m.user_id,
-            title: `🧾 ${professional.name} generó un presupuesto`,
-            body: `${lead.concept ?? ''} · ${client} (${formatCurrency(total)})`,
-            is_read: false,
-          })
-        }
-      }
+      const { error } = await supabase.rpc('pro_budget_create', {
+        p_token: token, p_lead_id: lead.id, p_client_name: client,
+        p_client_phone: lead.phone || null, p_client_address: lead.address || null,
+        p_concept: lead.concept || null, p_lines: result.lines, p_subtotal: subtotal,
+        p_vat_percent: 21, p_vat_amount: vatAmount, p_total: total,
+        p_notes: result.notes || null, p_trade: lead.concept || 'General',
+      })
+      if (error) throw error
       toast.success('Presupuesto generado')
-      await loadPartidas(professional.id)
+      await reload()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al generar el presupuesto')
     } finally {
@@ -209,54 +189,26 @@ export function ProPanel() {
     setSavingPartida(true)
     const subtotal = Math.round(partidaSubtotal * 100) / 100
     const status = newStatus ?? selectedPartida.status
-    const { error } = await supabase.from('budget_partidas').update({
-      lines: partidaLines, subtotal, status, updated_at: new Date().toISOString(),
-    }).eq('id', selectedPartida.id)
+    const { error } = await supabase.rpc('pro_partida_save', {
+      p_token: token, p_partida_id: selectedPartida.id, p_lines: partidaLines, p_subtotal: subtotal, p_status: status,
+    })
     if (error) { toast.error('Error al guardar'); setSavingPartida(false); return }
-
-    // Notificar a la organización
-    const { data: members } = await supabase.from('org_members').select('user_id').eq('org_id', selectedPartida.org_id)
-    const statusLabel = newStatus ? PARTIDA_STATUS[newStatus].label : 'actualizada'
-    for (const m of members ?? []) {
-      await supabase.from('notifications').insert({
-        user_id: m.user_id,
-        title: `🧾 ${professional.name} — partida ${newStatus ? statusLabel.toLowerCase() : 'editada'}`,
-        body: `${selectedPartida.trade} · ${selectedPartida.budget?.client_name ?? ''} (${formatCurrency(subtotal)})`,
-        is_read: false,
-      })
-    }
-    toast.success(newStatus ? `Partida marcada como ${statusLabel}` : 'Cambios guardados')
+    const statusLabel = newStatus ? PARTIDA_STATUS[newStatus].label : null
+    toast.success(statusLabel ? `Partida marcada como ${statusLabel}` : 'Cambios guardados')
     setSavingPartida(false)
-    await loadPartidas(professional.id)
+    await reload()
     setSelectedPartida(prev => prev ? { ...prev, lines: partidaLines, subtotal, status } : prev)
   }
 
   async function loadComments(leadId: string) {
-    const { data } = await supabase
-      .from('lead_comments').select('id,content,created_at')
-      .eq('lead_id', leadId).eq('is_professional', true).order('created_at')
-    setComments(data ?? [])
+    const { data } = await supabase.rpc('pro_lead_comments', { p_token: token, p_lead_id: leadId })
+    setComments((data ?? []) as ProComment[])
   }
 
   async function submitNote() {
     if (!newNote.trim() || !selectedLead || !professional) return
-    await supabase.from('lead_comments').insert({
-      lead_id: selectedLead.id,
-      user_id: null,         // sin user_id (acceso sin auth)
-      content: newNote.trim(),
-      is_professional: true,
-    })
-    // Notificar a la org
-    const { data: members } = await supabase
-      .from('org_members').select('user_id').eq('org_id', selectedLead.org_id)
-    for (const m of members ?? []) {
-      await supabase.from('notifications').insert({
-        user_id: m.user_id,
-        title: `📝 ${professional.name} dejó una nota`,
-        body: `En lead: ${selectedLead.name} — ${newNote.substring(0, 80)}`,
-        is_read: false,
-      })
-    }
+    const { error } = await supabase.rpc('pro_lead_comment', { p_token: token, p_lead_id: selectedLead.id, p_content: newNote.trim() })
+    if (error) { toast.error('Error al enviar'); return }
     toast.success('Nota enviada')
     setNewNote('')
     loadComments(selectedLead.id)
@@ -272,21 +224,11 @@ export function ProPanel() {
       const { data: up, error } = await supabase.storage.from('lead-files').upload(path, file)
       if (error) throw error
       const { data: urlData } = supabase.storage.from('lead-files').getPublicUrl(up.path)
-      await supabase.from('lead_files').insert({
-        lead_id: selectedLead.id, name: `[PROFESIONAL] ${file.name}`,
-        url: urlData.publicUrl, type: file.type, size: file.size,
+      const { error: rpcErr } = await supabase.rpc('pro_lead_file', {
+        p_token: token, p_lead_id: selectedLead.id, p_name: `[PROFESIONAL] ${file.name}`,
+        p_url: urlData.publicUrl, p_type: file.type, p_size: file.size,
       })
-      // Notificar a la org
-      const { data: members } = await supabase
-        .from('org_members').select('user_id').eq('org_id', selectedLead.org_id)
-      for (const m of members ?? []) {
-        await supabase.from('notifications').insert({
-          user_id: m.user_id,
-          title: `📎 ${professional.name} subió un archivo`,
-          body: `${file.name} en lead: ${selectedLead.name}`,
-          is_read: false,
-        })
-      }
+      if (rpcErr) throw rpcErr
       toast.success('Archivo subido')
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al subir')
@@ -412,7 +354,7 @@ export function ProPanel() {
           {/* Base de conocimiento */}
           <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-2">
             <h3 className="text-sm font-bold text-gray-800">Mis ejemplos y documentos</h3>
-            {professional && <ProKnowledgeManager professionalId={professional.id} orgId={professional.org_id} />}
+            {professional && <ProKnowledgeManager professionalId={professional.id} orgId={professional.org_id} proToken={token} />}
           </div>
         </div>
       </div>

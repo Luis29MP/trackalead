@@ -15,8 +15,9 @@ export function JoinOrg() {
 
   useEffect(() => {
     if (!orgId) return
-    supabase.from('organizations').select('name').eq('id', orgId).maybeSingle()
-      .then(({ data }) => setOrgName(data?.name ?? null))
+    // RPC: nombre de la org aunque aún no seas miembro (RLS no lo permitiría)
+    supabase.rpc('org_name_by_id', { p_org_id: orgId })
+      .then(({ data }) => setOrgName((data as string | null) ?? null))
   }, [orgId])
 
   useEffect(() => {

@@ -31,18 +31,12 @@ export function AcceptInvite() {
 
   async function loadInvitation() {
     setLoading(true)
-    const { data } = await supabase
-      .from('invitations')
-      .select('*, organization:organizations(name)')
-      .eq('token', token)
-      .maybeSingle()
-
+    const { data } = await supabase.rpc('invitation_by_token', { p_token: token })
     if (!data) { setNotFound(true); setLoading(false); return }
-    if (data.accepted_at) { setAlreadyUsed(true); setLoading(false); return }
-
-    const org = data.organization as unknown as { name: string } | null
-    setInvitation({ ...data, org_name: org?.name })
-    setForm(f => ({ ...f, name: data.name ?? '', email: data.email ?? '' }))
+    const inv = data as Invitation & { org_name?: string }
+    if (inv.accepted_at) { setAlreadyUsed(true); setLoading(false); return }
+    setInvitation(inv)
+    setForm(f => ({ ...f, name: inv.name ?? '', email: inv.email ?? '' }))
     setLoading(false)
   }
 
@@ -65,22 +59,14 @@ export function AcceptInvite() {
 
       const userId = authData.user.id
 
-      // 2. Crear/actualizar perfil
+      // 2. Crear/actualizar perfil (policy profiles_insert_own)
       await supabase.from('profiles').upsert({
         id: userId, email: form.email, full_name: form.name.trim(),
       }, { onConflict: 'id' })
 
-      // 3. Insertar en org_members con rol y permisos de la invitación
-      await supabase.from('org_members').insert({
-        org_id: invitation.org_id,
-        user_id: userId,
-        role: invitation.role,
-        permissions: invitation.permissions,
-        status: 'active',
-      })
-
-      // 4. Marcar invitación como aceptada
-      await supabase.from('invitations').update({ accepted_at: new Date().toISOString() }).eq('id', invitation.id)
+      // 3. Aceptar invitación: crea la membresía con rol/permisos y marca aceptada (RPC SECURITY DEFINER)
+      const { error: accErr } = await supabase.rpc('accept_invitation', { p_token: token, p_user_id: userId })
+      if (accErr) throw accErr
 
       setDone(true)
       toast.success('¡Bienvenido a TrackALead!')

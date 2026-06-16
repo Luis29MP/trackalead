@@ -15,7 +15,8 @@ const TYPE_META: Record<string, { label: string; icon: React.ElementType; color:
   document:       { label: 'Documento',           icon: Table, color: 'text-gray-500' },
 }
 
-export function ProKnowledgeManager({ professionalId, orgId }: { professionalId: string; orgId: string }) {
+// proToken: si se pasa, se usa el flujo sin sesión (panel del profesional) vía RPCs.
+export function ProKnowledgeManager({ professionalId, orgId, proToken }: { professionalId: string; orgId: string; proToken?: string }) {
   const [items, setItems] = useState<ProKnowledge[]>([])
   const [uploading, setUploading] = useState(false)
   const [noteTitle, setNoteTitle] = useState('')
@@ -24,9 +25,22 @@ export function ProKnowledgeManager({ professionalId, orgId }: { professionalId:
   useEffect(() => { load() }, [professionalId])
 
   async function load() {
+    if (proToken) {
+      const { data } = await supabase.rpc('pro_knowledge_list', { p_token: proToken })
+      setItems((data ?? []) as ProKnowledge[])
+      return
+    }
     const { data } = await supabase.from('pro_knowledge').select('*')
       .eq('professional_id', professionalId).order('created_at', { ascending: false })
     setItems((data ?? []) as ProKnowledge[])
+  }
+
+  async function insertItem(type: string, title: string | null, content_text: string | null, file_url: string | null) {
+    if (proToken) {
+      await supabase.rpc('pro_knowledge_add', { p_token: proToken, p_type: type, p_title: title, p_content_text: content_text, p_file_url: file_url })
+    } else {
+      await supabase.from('pro_knowledge').insert({ professional_id: professionalId, org_id: orgId, type, title, content_text, file_url })
+    }
   }
 
   async function handleFiles(files: FileList | null) {
@@ -42,10 +56,7 @@ export function ProKnowledgeManager({ professionalId, orgId }: { professionalId:
         const type = /presupuesto|budget|oferta/i.test(file.name)
           ? 'example_budget'
           : (/\.(xlsx|xls|csv)$/i.test(file.name) ? 'rate_table' : 'document')
-        await supabase.from('pro_knowledge').insert({
-          professional_id: professionalId, org_id: orgId, type,
-          title: file.name, content_text: content || null, file_url: fileUrl,
-        })
+        await insertItem(type, file.name, content || null, fileUrl)
       }
       toast.success('Material añadido a la base de conocimiento')
       await load()
@@ -58,17 +69,15 @@ export function ProKnowledgeManager({ professionalId, orgId }: { professionalId:
 
   async function addNote() {
     if (!noteText.trim()) return
-    await supabase.from('pro_knowledge').insert({
-      professional_id: professionalId, org_id: orgId, type: 'note',
-      title: noteTitle.trim() || 'Nota', content_text: noteText.trim(),
-    })
+    await insertItem('note', noteTitle.trim() || 'Nota', noteText.trim(), null)
     setNoteTitle(''); setNoteText('')
     toast.success('Nota guardada')
     load()
   }
 
   async function remove(id: string) {
-    await supabase.from('pro_knowledge').delete().eq('id', id)
+    if (proToken) await supabase.rpc('pro_knowledge_delete', { p_token: proToken, p_id: id })
+    else await supabase.from('pro_knowledge').delete().eq('id', id)
     setItems(prev => prev.filter(i => i.id !== id))
   }
 

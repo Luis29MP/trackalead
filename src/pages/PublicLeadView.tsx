@@ -32,14 +32,8 @@ export function PublicLeadView() {
 
   async function fetchLead() {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('leads')
-      // Solo campos públicos — sin email, comisiones ni datos internos
-      .select('name, zone, address, concept, notes, phone, lat, lng')
-      .eq('public_token', token)
-      .eq('is_archived', false)
-      .maybeSingle()
-
+    // RPC con SECURITY DEFINER: solo expone campos públicos del lead por su token
+    const { data, error } = await supabase.rpc('public_lead_by_token', { p_token: token })
     if (error || !data) {
       setNotFound(true)
     } else {

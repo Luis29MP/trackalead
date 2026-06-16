@@ -76,13 +76,33 @@ npx supabase secrets set AI_KEYS_KEK="<valor-generado>" --project-ref TU_PROJECT
 - [ ] Leaked password protection activada.
 - [ ] Edge Functions desplegadas.
 - [ ] Google Maps key restringida por dominio.
-- [ ] **RLS activado** en las tablas públicas (ver más abajo — pendiente).
+- [x] **RLS activado** en las 18 tablas públicas (ver punto 6).
 - [ ] `.env.local` **NO** subido al repo (ya está en `.gitignore`).
 
 ---
 
-## 6. ⚠️ Pendiente de seguridad antes de abrir al público: RLS
+## 6. ✅ Seguridad: Row Level Security (RLS)
 
-Actualmente **18 tablas tienen Row Level Security desactivado**. Como el `anon key` viaja en el bundle, hoy cualquiera podría leer/escribir datos de todas las organizaciones vía la API de Supabase.
+**RLS está activado** en las 18 tablas públicas con aislamiento por organización
+(`boards, board_columns, leads, lead_files, lead_comments, lead_activity, calendar_events,
+notifications, budgets, budget_partidas, professionals, pro_knowledge, organizations,
+org_members, profiles, invitations, plan_config, error_logs`). El `anon key` ya no permite
+leer/escribir datos de otras organizaciones.
 
-**No abrir a clientes reales hasta activar RLS** con aislamiento por organización. Implica además adaptar los flujos sin sesión (panel del profesional `/pro/:token`, enlaces públicos `/p/:token`, invitaciones) a Edge Functions con `service_role`, porque RLS estricto bloquea el acceso anónimo. (Tarea planificada aparte.)
+**Arquitectura de los flujos sin sesión:** el panel del profesional (`/pro/:token`), los
+enlaces públicos de lead (`/p/:token`), las invitaciones (`/invite/:token`) y el alta por
+enlace (`/join/:orgId`) **no** usan acceso directo a tablas (RLS lo bloquearía con el `anon
+key`). Validan el token en el servidor mediante funciones `SECURITY DEFINER` (RPCs:
+`pro_load`, `pro_partida_save`, `pro_lead_comment`, `pro_lead_comments`, `pro_lead_file`,
+`pro_budget_create`, `pro_rates_save`, `pro_knowledge_*`, `public_lead_by_token`,
+`invitation_by_token`, `accept_invitation`, `org_name_by_id`).
+
+**Panel SuperAdmin (SAT) y modo fantasma:** las políticas `is_super_admin()` dan al rol
+super admin lectura cross-org (y escritura sobre `organizations`/`profiles`/`plan_config`)
+para que el panel SAT y la visualización fantasma sigan funcionando con RLS activo.
+
+**Pendiente manual (no bloqueante de RLS):**
+- Activar *Leaked password protection* en Supabase Auth.
+- Los buckets públicos (`lead-files`, `pro-knowledge`, `budgets`, `lead-attachments`)
+  permiten listar objetos por su política `SELECT` amplia; si se quiere ocultar el listado,
+  restringir esas políticas (el acceso por URL pública del objeto seguiría funcionando).
