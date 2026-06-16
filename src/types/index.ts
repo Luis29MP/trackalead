@@ -159,9 +159,16 @@ export interface Professional {
   app_access: boolean
   last_access: string | null
   rates?: ProRate[]
+  company_name?: string | null
+  address?: string | null
+  cif?: string | null
+  logo_url?: string | null    // data URL (base64) del logo
 }
 
 export type BudgetStatus = 'draft' | 'sent' | 'accepted' | 'rejected'
+
+// Estado de una partida de cara al profesional asignado
+export type PartidaStatus = 'pending' | 'accepted' | 'rejected' | 'done'
 
 export interface BudgetLine {
   concept: string
@@ -170,11 +177,28 @@ export interface BudgetLine {
   total: number
 }
 
+// Partida (gremio) de un presupuesto, asignable a un profesional
+export interface BudgetPartida {
+  id: string
+  budget_id: string
+  org_id: string
+  trade: string                 // gremio: albañilería, fontanería, electricidad…
+  professional_id: string | null
+  lines: BudgetLine[]
+  subtotal: number
+  status: PartidaStatus
+  notes: string | null
+  position: number
+  created_at: string
+  updated_at: string
+}
+
 export interface Budget {
   id: string
   org_id: string
   lead_id: string | null
   created_by: string | null
+  professional_id?: string | null
   client_name: string | null
   client_phone: string | null
   client_address: string | null
@@ -191,6 +215,17 @@ export interface Budget {
   ai_generated: boolean
   created_at: string
   updated_at: string
+}
+
+export interface ProKnowledge {
+  id: string
+  professional_id: string
+  org_id: string
+  type: string                  // document, example_budget, rate_table, note
+  title: string | null
+  content_text: string | null
+  file_url: string | null
+  created_at: string
 }
 
 export type EventType = 'visita_presencial' | 'llamada' | 'seguimiento' | 'presupuesto_insitu' | 'reunion' | 'otro'

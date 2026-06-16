@@ -20,7 +20,7 @@ import type { OrgMember, Profile, UserRole, Board, Invitation } from '@/types'
 
 const ROLE_LABEL: Record<string, string> = {
   owner: 'Propietario', admin: 'Administrador',
-  manager: 'Gestor', installer: 'Instalador',
+  manager: 'Colaborador', installer: 'Instalador',
 }
 const ROLE_COLOR: Record<string, string> = {
   owner: 'bg-amber-100 text-amber-700', admin: 'bg-purple-100 text-purple-700',
@@ -261,7 +261,7 @@ export function Team() {
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">Administrador — acceso total</SelectItem>
-                    <SelectItem value="manager">Gestor — gestión de leads</SelectItem>
+                    <SelectItem value="manager">Colaborador — control casi total (presupuestos, leads, tableros, agenda…)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -342,7 +342,7 @@ export function Team() {
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">Administrador</SelectItem>
-                    <SelectItem value="manager">Gestor</SelectItem>
+                    <SelectItem value="manager">Colaborador</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

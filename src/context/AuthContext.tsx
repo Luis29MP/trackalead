@@ -83,11 +83,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function loadOrg(userId: string) {
-    const { data: member } = await supabase
-      .from('org_members').select('org_id').eq('user_id', userId).maybeSingle()
-    if (!member) { setOrganization(null); return }
+    // Un usuario puede pertenecer a varias organizaciones: las cargamos todas
+    // y elegimos la seleccionada (localStorage) o la primera.
+    const { data: members } = await supabase
+      .from('org_members').select('org_id').eq('user_id', userId)
+    if (!members || members.length === 0) { setOrganization(null); return }
+    const selected = localStorage.getItem('selected_org_id')
+    const chosenId = (selected && members.some(m => m.org_id === selected)) ? selected : members[0].org_id
     const { data: org } = await supabase
-      .from('organizations').select('*').eq('id', member.org_id).maybeSingle()
+      .from('organizations').select('*').eq('id', chosenId).maybeSingle()
     setOrganization(org ?? null)
   }
 
@@ -125,6 +129,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // 23505 = unique violation → ya era miembro, no es un error real
     if (mErr && mErr.code !== '23505') throw new Error(`Error al unirse: ${mErr.message}`)
 
+    // La org recién creada pasa a ser la activa (y persiste tras recargar)
+    localStorage.setItem('selected_org_id', org.id)
     setOrganization(org)
   }
 
@@ -132,6 +138,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!organization) throw new Error('Sin organización activa')
     const { error } = await supabase.from('organizations').delete().eq('id', organization.id)
     if (error) throw new Error(`Error al eliminar: ${error.message}`)
+    localStorage.removeItem('selected_org_id')
     setOrganization(null)
   }
 

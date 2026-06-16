@@ -26,10 +26,9 @@ const NAV_ITEMS = [
 ]
 
 function OrgSwitcher() {
-  const { organization, session, profile } = useAuth()
+  const { organization, session } = useAuth()
   const [orgs, setOrgs] = useState<Organization[]>([])
   const [open, setOpen] = useState(false)
-  const isLifetime = profile?.plan_status === 'lifetime'
 
   useEffect(() => {
     if (!session) return
@@ -55,11 +54,8 @@ function OrgSwitcher() {
             {organization.name.charAt(0).toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-white text-xs font-semibold truncate flex items-center gap-1">
-              <span className="truncate">{organization.name}</span>
-              {isLifetime && <Star className="h-3 w-3 text-amber-400 fill-amber-400 shrink-0" />}
-            </p>
-            <p className="text-slate-600 text-[10px] truncate">{isLifetime ? 'Lifetime ⭐' : organization.name}</p>
+            <p className="text-white text-xs font-semibold truncate">{organization.name}</p>
+            <p className="text-slate-600 text-[10px] truncate">Organización</p>
           </div>
         </div>
       </div>
@@ -76,11 +72,8 @@ function OrgSwitcher() {
           {organization?.name?.charAt(0).toUpperCase() ?? 'O'}
         </div>
         <div className="flex-1 min-w-0 text-left">
-          <p className="text-white text-xs font-semibold truncate flex items-center gap-1">
-            <span className="truncate">{organization?.name ?? '…'}</span>
-            {isLifetime && <Star className="h-3 w-3 text-amber-400 fill-amber-400 shrink-0" />}
-          </p>
-          <p className="text-slate-600 text-[10px] truncate">{isLifetime ? 'Lifetime ⭐' : (organization?.name ?? '…')}</p>
+          <p className="text-white text-xs font-semibold truncate">{organization?.name ?? '…'}</p>
+          <p className="text-slate-600 text-[10px] truncate">Cambiar organización</p>
         </div>
         <ChevronDown className={cn('h-3 w-3 text-slate-400 transition-transform shrink-0', open && 'rotate-180')} />
       </button>
@@ -126,6 +119,7 @@ function OrgSwitcher() {
 export function Sidebar({ width = 240 }: { width?: number }) {
   const { profile, signOut, systemRole } = useAuth()
   const navigate = useNavigate()
+  const isLifetime = profile?.plan_status === 'lifetime'
 
   async function handleSignOut() {
     await signOut()
@@ -192,21 +186,30 @@ export function Sidebar({ width = 240 }: { width?: number }) {
       {/* User */}
       <div className="px-3 pb-4 border-t border-white/10 pt-3 shrink-0">
         <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg">
-          <Avatar className="h-7 w-7 shrink-0">
-            <AvatarImage src={profile?.avatar_url ?? undefined} />
-            <AvatarFallback className="bg-primary-800 text-white text-xs">
-              {profile?.full_name ? getInitials(profile.full_name) : 'U'}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <p className="text-white text-xs font-medium truncate leading-tight">
-              {profile?.full_name ?? 'Usuario'}
-            </p>
-            <p className="text-slate-500 text-[11px] truncate">{profile?.email}</p>
-          </div>
+          <button
+            onClick={() => navigate('/settings')}
+            className="flex items-center gap-2.5 flex-1 min-w-0 rounded-lg hover:bg-white/5 transition-colors text-left -mx-1 px-1 py-1"
+            title="Tu cuenta y configuración"
+          >
+            <Avatar className="h-7 w-7 shrink-0">
+              <AvatarImage src={profile?.avatar_url ?? undefined} />
+              <AvatarFallback className="bg-primary-800 text-white text-xs">
+                {profile?.full_name ? getInitials(profile.full_name) : 'U'}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-xs font-medium truncate leading-tight flex items-center gap-1">
+                <span className="truncate">{profile?.full_name ?? 'Usuario'}</span>
+                {isLifetime && <Star className="h-3 w-3 text-amber-400 fill-amber-400 shrink-0" />}
+              </p>
+              <p className="text-slate-500 text-[11px] truncate">
+                {profile?.email}{isLifetime && <span className="text-amber-400"> · Lifetime</span>}
+              </p>
+            </div>
+          </button>
           <button
             onClick={handleSignOut}
-            className="text-slate-500 hover:text-white transition-colors"
+            className="text-slate-500 hover:text-white transition-colors shrink-0"
             title="Cerrar sesión"
           >
             <LogOut className="h-3.5 w-3.5" />

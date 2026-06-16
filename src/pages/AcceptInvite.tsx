@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import type { Invitation } from '@/types'
 
 const ROLE_LABEL: Record<string, string> = {
-  owner: 'Propietario', admin: 'Administrador', manager: 'Gestor', installer: 'Instalador',
+  owner: 'Propietario', admin: 'Administrador', manager: 'Colaborador', installer: 'Instalador',
 }
 
 export function AcceptInvite() {

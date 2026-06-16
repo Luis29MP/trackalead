@@ -5,7 +5,7 @@ import {
   MessageSquare, Activity, User, DollarSign, CheckCircle, Clock,
   Trash2, Wrench, Building2, MessageCircle, ChevronRight, Calendar,
   AlertCircle, Share2, Link, Copy, Check, Trash,
-  CalendarPlus, Home, PhoneCall, RefreshCw, ClipboardList,
+  CalendarPlus, Home, PhoneCall, RefreshCw, ClipboardList, FileText, Download,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
@@ -27,7 +27,16 @@ import {
   formatCurrency, formatDate, formatDateTime, formatRelativeTime,
   getInitials, sourceLabel, calculateCommission, toLocalInput, toUTCIso,
 } from '@/lib/utils'
-import type { BoardColumn, CalendarEvent, EventType, LeadComment, LeadActivity, LeadFile, Professional } from '@/types'
+import { exportBudgetPdf, type PdfOrgInfo } from '@/lib/budgetPdf'
+import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
+import type { BoardColumn, CalendarEvent, EventType, LeadComment, LeadActivity, LeadFile, Professional, Budget } from '@/types'
+
+const BUDGET_STATUS: Record<string, { label: string; color: string }> = {
+  draft:    { label: 'Borrador', color: 'bg-gray-100 text-gray-600' },
+  sent:     { label: 'Enviado',  color: 'bg-blue-100 text-blue-700' },
+  accepted: { label: 'Aceptado', color: 'bg-green-100 text-green-700' },
+  rejected: { label: 'Rechazado',color: 'bg-red-100 text-red-700' },
+}
 
 // Limpia prefijos "Nombre:", "Cliente:" del smart paste
 function cleanName(n: string | null | undefined): string {
@@ -207,6 +216,7 @@ export function LeadDetail() {
   const [activities,   setActivities]   = useState<LeadActivity[]>([])
   const [files,        setFiles]        = useState<LeadFile[]>([])
   const [professionals,setProfessionals] = useState<Professional[]>([])
+  const [leadBudgets,  setLeadBudgets]   = useState<Budget[]>([])
   const [columns,      setColumns]      = useState<BoardColumn[]>([])
   const [newComment,   setNewComment]   = useState('')
   const [uploading,    setUploading]    = useState(false)
@@ -291,19 +301,42 @@ export function LeadDetail() {
   async function loadRelated() {
     if (!id) return
     try {
-      const [{ data: c }, { data: a }, { data: f }, { data: ev }] = await Promise.all([
+      const [{ data: c }, { data: a }, { data: f }, { data: ev }, { data: bg }] = await Promise.all([
         supabase.from('lead_comments').select('*, profile:profiles(id,full_name,email)').eq('lead_id', id).order('created_at'),
         supabase.from('lead_activity').select('*, profile:profiles(id,full_name)').eq('lead_id', id).order('created_at', { ascending: false }).limit(30),
         supabase.from('lead_files').select('*').eq('lead_id', id).order('created_at'),
         supabase.from('calendar_events').select('*').eq('lead_id', id).order('start_at'),
+        supabase.from('budgets').select('*').eq('lead_id', id).order('created_at', { ascending: false }),
       ])
       setComments(c ?? [])
       setActivities(a ?? [])
       setFiles(f ?? [])
       setLeadEvents(ev ?? [])
+      setLeadBudgets((bg ?? []) as Budget[])
     } catch (err) {
       console.error('[loadRelated]', err)
     }
+  }
+
+  // ── Presupuestos del lead ──────────────────────────────────────────────────
+  function budgetIssuer(b: Budget): PdfOrgInfo {
+    const pro = professionals.find(p => p.id === b.professional_id)
+    if (pro && (pro.company_name || pro.logo_url)) {
+      const addr = [pro.address, pro.cif ? `NIF: ${pro.cif}` : null].filter(Boolean).join('  ·  ')
+      return { name: pro.company_name || pro.name, phone: pro.phone, email: pro.email, address: addr || null, logoUrl: pro.logo_url ?? null }
+    }
+    return { name: organization?.name }
+  }
+  function exportBudget(b: Budget) {
+    exportBudgetPdf(b, budgetIssuer(b))
+  }
+  async function budgetWhatsApp(b: Budget) {
+    const win = window.open('', '_blank')  // abrir ya para evitar bloqueo de popup
+    toast.info('Preparando PDF…')
+    const url = await uploadBudgetPdf(b, budgetIssuer(b))
+    const wa = buildWhatsAppUrl(b, url, b.client_name || lead?.name || '', b.client_phone || lead?.phone || null)
+    if (win) win.location.href = wa
+    else window.open(wa, '_blank')
   }
 
   // ── Guardar edición completa ───────────────────────────────────────────────
@@ -847,7 +880,46 @@ export function LeadDetail() {
                 <Paperclip className="h-3.5 w-3.5 mr-1.5" />
                 Archivos ({files.length})
               </TabsTrigger>
+              <TabsTrigger value="budgets">
+                <FileText className="h-3.5 w-3.5 mr-1.5" />
+                Presupuestos ({leadBudgets.length})
+              </TabsTrigger>
             </TabsList>
+
+            {/* ── Presupuestos ─────────────────────────────────────────── */}
+            <TabsContent value="budgets" className="mt-4">
+              {leadBudgets.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <FileText className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">Sin presupuestos para este cliente</p>
+                  <button className="mt-2 text-xs text-primary-600" onClick={() => navigate('/budgets')}>Ir a Presupuestos →</button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {leadBudgets.map(b => {
+                    const st = BUDGET_STATUS[b.status] ?? BUDGET_STATUS.draft
+                    return (
+                      <div key={b.id} className="flex items-center gap-3 border border-gray-100 rounded-lg px-3 py-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
+                          <FileText className="h-4 w-4 text-primary-600" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-800 truncate">{b.concept || 'Presupuesto'}</p>
+                          <p className="text-xs text-gray-400">{formatDate(b.created_at)} · {b.lines?.length ?? 0} líneas</p>
+                        </div>
+                        <span className="font-semibold text-gray-900 text-sm shrink-0">{formatCurrency(b.total)}</span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${st.color}`}>{st.label}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button onClick={() => budgetWhatsApp(b)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-500" title="Enviar por WhatsApp"><MessageCircle className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => exportBudget(b)} className="p-1.5 rounded hover:bg-blue-50 text-blue-500" title="Exportar PDF"><Download className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => navigate('/budgets')} className="p-1.5 rounded hover:bg-gray-100 text-gray-400" title="Abrir en Presupuestos"><ChevronRight className="h-3.5 w-3.5" /></button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </TabsContent>
 
             {/* Comentarios */}
             {/* ── Visitas ──────────────────────────────────────────── */}

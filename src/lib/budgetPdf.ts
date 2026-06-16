@@ -18,17 +18,38 @@ function eur(n: number): string {
   return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
 }
 
-export function exportBudgetPdf(budget: Budget, org: PdfOrgInfo = {}) {
+// Red de seguridad: el cliente NUNCA debe ver el margen/comisión/sobrecoste.
+// Elimina cualquier frase de las notas que lo mencione.
+function sanitizeClientNotes(text: string): string {
+  const FORBIDDEN = /(margen|comisi[oó]n|sobrecoste|sobre[\s-]?coste|markup|beneficio interno|incremento (del|de un) \d+\s*%|\d+\s*%\s*(adicional|de margen|extra))/i
+  return text
+    .split(/(?<=[.\n])/)            // trocear por frases/líneas
+    .filter(s => !FORBIDDEN.test(s))
+    .join('')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+function buildDoc(budget: Budget, org: PdfOrgInfo = {}): { doc: jsPDF; fileName: string } {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const marginX = 14
   let y = 16
 
   // ── Cabecera: logo + datos empresa (izq) / "PRESUPUESTO" (der) ──────────────
+  let logoW = 0
   if (org.logoUrl) {
-    try { doc.addImage(org.logoUrl, 'PNG', marginX, y, 24, 24) } catch { /* logo inválido, se omite */ }
+    try {
+      const props = doc.getImageProperties(org.logoUrl)
+      const maxW = 30, maxH = 22
+      const ratio = Math.min(maxW / props.width, maxH / props.height)
+      logoW = props.width * ratio
+      const logoH = props.height * ratio
+      const fmt = (props.fileType || 'PNG').toUpperCase()
+      doc.addImage(org.logoUrl, fmt, marginX, y, logoW, logoH)
+    } catch { logoW = 0 /* logo inválido, se omite */ }
   }
-  const headerX = org.logoUrl ? marginX + 30 : marginX
+  const headerX = logoW > 0 ? marginX + logoW + 5 : marginX
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(14)
@@ -143,7 +164,8 @@ export function exportBudgetPdf(budget: Budget, org: PdfOrgInfo = {}) {
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8.5)
   doc.setTextColor(80, 80, 80)
-  const conditions = budget.notes?.trim() || 'Presupuesto sin compromiso. Precios sujetos a revisión tras visita técnica.'
+  const safeNotes = sanitizeClientNotes(budget.notes ?? '')
+  const conditions = safeNotes || 'Presupuesto sin compromiso. Precios sujetos a revisión tras visita técnica.'
   const condLines = doc.splitTextToSize(conditions, pageW - marginX * 2)
   doc.text(condLines, marginX, afterY)
   afterY += condLines.length * 4.2 + 3
@@ -160,5 +182,18 @@ export function exportBudgetPdf(budget: Budget, org: PdfOrgInfo = {}) {
   const footer = [org.name, org.phone, org.email].filter(Boolean).join('  ·  ')
   doc.text(footer || 'TrackALead', pageW / 2, pageH - 11, { align: 'center' })
 
-  doc.save(`Presupuesto_${(budget.client_name || 'cliente').replace(/\s+/g, '_')}_${num}.pdf`)
+  const fileName = `Presupuesto_${(budget.client_name || 'cliente').replace(/\s+/g, '_')}_${num}.pdf`
+  return { doc, fileName }
+}
+
+// Descarga el PDF
+export function exportBudgetPdf(budget: Budget, org: PdfOrgInfo = {}) {
+  const { doc, fileName } = buildDoc(budget, org)
+  doc.save(fileName)
+}
+
+// Devuelve el PDF como Blob (para subirlo a Storage y compartir por WhatsApp)
+export function budgetPdfBlob(budget: Budget, org: PdfOrgInfo = {}): Blob {
+  const { doc } = buildDoc(budget, org)
+  return doc.output('blob')
 }

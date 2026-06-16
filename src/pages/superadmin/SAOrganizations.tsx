@@ -39,7 +39,7 @@ const PLAN_COLOR: Record<string, string> = {
   enterprise: 'bg-purple-100 text-purple-700',
 }
 const ROLE_LABEL: Record<string, string> = {
-  owner: 'Propietario', admin: 'Administrador', manager: 'Gestor', installer: 'Instalador',
+  owner: 'Propietario', admin: 'Administrador', manager: 'Colaborador', installer: 'Instalador',
 }
 
 export function SAOrganizations() {

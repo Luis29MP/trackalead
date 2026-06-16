@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Plus, HardHat, Phone, Mail, Pencil, Trash2, Smartphone, Copy, Check, ExternalLink } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Plus, HardHat, Phone, Mail, Pencil, Trash2, Smartphone, Copy, Check, ExternalLink, Upload, FileText, Eye, ChevronRight, MapPin, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,13 +14,44 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
-import type { Professional, ProRate } from '@/types'
+import { ProKnowledgeManager } from '@/components/ProKnowledgeManager'
+import type { Professional, ProRate, Budget } from '@/types'
+
+interface DetailLead { id: string; name: string; concept: string | null; zone: string | null; address: string | null }
 
 interface ProForm {
   name: string; phone: string; email: string; specialty: string
   is_active: boolean; app_access: boolean; rates: ProRate[]
+  company_name: string; address: string; cif: string; logo_url: string
 }
-const EMPTY: ProForm = { name: '', phone: '', email: '', specialty: '', is_active: true, app_access: false, rates: [] }
+const EMPTY: ProForm = {
+  name: '', phone: '', email: '', specialty: '', is_active: true, app_access: false, rates: [],
+  company_name: '', address: '', cif: '', logo_url: '',
+}
+
+// Redimensiona el logo a máx. 300px y lo pasa a data URL PNG (para el PDF)
+function logoToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      const max = 300
+      const scale = Math.min(1, max / Math.max(img.width, img.height))
+      const w = Math.round(img.width * scale)
+      const h = Math.round(img.height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { URL.revokeObjectURL(url); reject(new Error('canvas')); return }
+      ctx.drawImage(img, 0, 0, w, h)
+      const dataUrl = canvas.toDataURL('image/png')
+      URL.revokeObjectURL(url)
+      resolve(dataUrl)
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('img')) }
+    img.src = url
+  })
+}
 
 export function Professionals() {
   const [professionals, setProfessionals] = useState<Professional[]>([])
@@ -29,7 +62,25 @@ export function Professionals() {
   const [form, setForm]                   = useState<ProForm>(EMPTY)
   const [magicLink, setMagicLink]         = useState('')
   const [copied, setCopied]               = useState(false)
+  const [stats, setStats]                 = useState<Record<string, { leads: number; budgets: number }>>({})
+  const [detailPro, setDetailPro]         = useState<Professional | null>(null)
+  const [detailLeads, setDetailLeads]     = useState<DetailLead[]>([])
+  const [detailBudgets, setDetailBudgets] = useState<Budget[]>([])
+  const [loadingDetail, setLoadingDetail] = useState(false)
   const { organization } = useAuth()
+  const navigate = useNavigate()
+
+  async function openDetail(p: Professional) {
+    setDetailPro(p)
+    setLoadingDetail(true)
+    const [{ data: leadsData }, { data: budgetsData }] = await Promise.all([
+      supabase.from('leads').select('id, name, concept, zone, address').eq('assigned_to', p.id).eq('is_archived', false).order('created_at', { ascending: false }),
+      supabase.from('budgets').select('*').eq('professional_id', p.id).order('created_at', { ascending: false }),
+    ])
+    setDetailLeads((leadsData ?? []) as DetailLead[])
+    setDetailBudgets((budgetsData ?? []) as Budget[])
+    setLoadingDetail(false)
+  }
 
   useEffect(() => {
     if (!organization) return
@@ -40,8 +91,20 @@ export function Professionals() {
     setLoading(true)
     const { data } = await supabase
       .from('professionals').select('*').eq('org_id', organization!.id).order('name')
-    setProfessionals(data ?? [])
+    const pros = data ?? []
+    setProfessionals(pros)
     setLoading(false)
+
+    // Estadísticas por profesional: leads asignados + presupuestos (partidas)
+    const s: Record<string, { leads: number; budgets: number }> = {}
+    await Promise.all(pros.map(async (p) => {
+      const [{ count: leads }, { count: budgets }] = await Promise.all([
+        supabase.from('leads').select('*', { count: 'exact', head: true }).eq('assigned_to', p.id).eq('is_archived', false),
+        supabase.from('budget_partidas').select('*', { count: 'exact', head: true }).eq('professional_id', p.id),
+      ])
+      s[p.id] = { leads: leads ?? 0, budgets: budgets ?? 0 }
+    }))
+    setStats(s)
   }
 
   function openCreate() {
@@ -53,8 +116,14 @@ export function Professionals() {
 
   function openEdit(p: Professional) {
     setEditing(p)
-    setForm({ name: p.name, phone: p.phone ?? '', email: p.email ?? '', specialty: p.specialty ?? '', is_active: p.is_active, app_access: p.app_access, rates: p.rates ?? [] })
-    setMagicLink(p.app_access && p.magic_token ? `${window.location.origin}/pro/${p.magic_token}` : '')
+    setForm({
+      name: p.name, phone: p.phone ?? '', email: p.email ?? '', specialty: p.specialty ?? '',
+      is_active: p.is_active, app_access: p.app_access, rates: p.rates ?? [],
+      company_name: p.company_name ?? '', address: p.address ?? '', cif: p.cif ?? '', logo_url: p.logo_url ?? '',
+    })
+    // No mostrar la pantalla del enlace al editar: el formulario manda. El enlace
+    // se ve dentro del formulario (sección "Acceso a la app").
+    setMagicLink('')
     setDialog(true)
   }
 
@@ -67,6 +136,8 @@ export function Professionals() {
           name: form.name, phone: form.phone || null, email: form.email || null,
           specialty: form.specialty || null, is_active: form.is_active, app_access: form.app_access,
           rates: form.rates,
+          company_name: form.company_name || null, address: form.address || null,
+          cif: form.cif || null, logo_url: form.logo_url || null,
         }).eq('id', editing.id).select().single()
         if (data?.app_access && data.magic_token) {
           setMagicLink(`${window.location.origin}/pro/${data.magic_token}`)
@@ -78,6 +149,8 @@ export function Professionals() {
           name: form.name, phone: form.phone || null, email: form.email || null,
           specialty: form.specialty || null, is_active: form.is_active, app_access: form.app_access,
           rates: form.rates,
+          company_name: form.company_name || null, address: form.address || null,
+          cif: form.cif || null, logo_url: form.logo_url || null,
         }).select().single()
         if (data?.app_access && data.magic_token) {
           setMagicLink(`${window.location.origin}/pro/${data.magic_token}`)
@@ -158,7 +231,7 @@ export function Professionals() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-semibold text-gray-900 truncate">{p.name}</p>
+                        <button onClick={() => openDetail(p)} className="font-semibold text-gray-900 truncate hover:text-primary-600 transition-colors text-left" title="Ver ficha">{p.name}</button>
                         <Badge variant={p.is_active ? 'success' : 'secondary'} className="text-xs shrink-0">
                           {p.is_active ? 'Activo' : 'Inactivo'}
                         </Badge>
@@ -169,6 +242,11 @@ export function Professionals() {
                         )}
                       </div>
                       {p.specialty && <p className="text-sm text-gray-500 mt-0.5">{p.specialty}</p>}
+                      {/* Estadísticas */}
+                      <div className="flex items-center gap-3 mt-1.5">
+                        <span className="text-xs text-gray-500 flex items-center gap-1"><HardHat className="h-3.5 w-3.5 text-gray-400" />{stats[p.id]?.leads ?? 0} lead{(stats[p.id]?.leads ?? 0) !== 1 ? 's' : ''}</span>
+                        <span className="text-xs text-gray-500 flex items-center gap-1"><FileText className="h-3.5 w-3.5 text-gray-400" />{stats[p.id]?.budgets ?? 0} presupuesto{(stats[p.id]?.budgets ?? 0) !== 1 ? 's' : ''}</span>
+                      </div>
                       {p.phone && (
                         <a href={`tel:${p.phone}`} className="flex items-center gap-1.5 mt-1.5 text-sm text-gray-600 hover:text-primary-600">
                           <Phone className="h-3.5 w-3.5" />{p.phone}
@@ -204,10 +282,13 @@ export function Professionals() {
                       )}
                     </div>
                     <div className="flex gap-1 shrink-0">
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(p)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500" onClick={() => openDetail(p)} title="Ver ficha">
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(p)} title="Editar">
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600" onClick={() => handleDelete(p.id)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600" onClick={() => handleDelete(p.id)} title="Eliminar">
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
@@ -219,26 +300,98 @@ export function Professionals() {
         </div>
       )}
 
+      {/* Ficha del profesional */}
+      <Dialog open={!!detailPro} onOpenChange={v => { if (!v) setDetailPro(null) }}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Ficha del profesional</DialogTitle></DialogHeader>
+          {detailPro && (
+            <div className="space-y-4">
+              {/* Cabecera */}
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold shrink-0">
+                  {detailPro.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-bold text-gray-900">{detailPro.company_name || detailPro.name}</p>
+                  <p className="text-xs text-gray-400">{[detailPro.specialty, detailPro.phone, detailPro.email].filter(Boolean).join(' · ')}</p>
+                </div>
+                <Button size="sm" variant="outline" className="ml-auto gap-1.5" onClick={() => { const p = detailPro; setDetailPro(null); openEdit(p) }}>
+                  <Pencil className="h-3.5 w-3.5" />Editar
+                </Button>
+              </div>
+
+              {loadingDetail ? (
+                <div className="flex justify-center py-8"><div className="animate-spin h-6 w-6 border-4 border-primary-600 border-t-transparent rounded-full" /></div>
+              ) : (
+                <>
+                  {/* Leads asignados */}
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Leads asignados ({detailLeads.length})</p>
+                    {detailLeads.length === 0 ? (
+                      <p className="text-sm text-gray-400">Sin leads asignados.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {detailLeads.map(l => (
+                          <button key={l.id} onClick={() => navigate(`/leads/${l.id}`)} className="w-full flex items-center gap-2 border border-gray-100 rounded-lg px-3 py-2 hover:bg-gray-50 text-left">
+                            <Wrench className="h-3.5 w-3.5 text-primary-500 shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-gray-800 truncate">{l.name}</p>
+                              <p className="text-xs text-gray-400 truncate">{[l.concept, l.zone || l.address].filter(Boolean).join(' · ')}</p>
+                            </div>
+                            <ChevronRight className="h-4 w-4 text-gray-300 shrink-0" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Presupuestos */}
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Presupuestos ({detailBudgets.length})</p>
+                    {detailBudgets.length === 0 ? (
+                      <p className="text-sm text-gray-400">Sin presupuestos.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {detailBudgets.map(b => (
+                          <button key={b.id} onClick={() => navigate('/budgets')} className="w-full flex items-center gap-2 border border-gray-100 rounded-lg px-3 py-2 hover:bg-gray-50 text-left">
+                            <FileText className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-gray-800 truncate">{b.concept || b.client_name}</p>
+                              <p className="text-xs text-gray-400">{formatDate(b.created_at)} · {b.client_name}</p>
+                            </div>
+                            <span className="text-sm font-semibold text-gray-900 shrink-0">{formatCurrency(b.total)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Dialog crear/editar */}
       <Dialog open={dialog} onOpenChange={v => { setDialog(v); if (!v) setMagicLink('') }}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>{editing ? 'Editar profesional' : 'Nuevo profesional'}</DialogTitle></DialogHeader>
 
           {magicLink ? (
             /* Mostrar enlace mágico */
-            <div className="space-y-4">
+            <div className="space-y-4 min-w-0">
               <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 text-center">
                 <Smartphone className="h-8 w-8 text-indigo-500 mx-auto mb-2" />
                 <p className="text-sm font-semibold text-indigo-700">{form.name} tiene acceso a la app</p>
                 <p className="text-xs text-indigo-500 mt-1">Comparte este enlace único con el profesional</p>
               </div>
-              <div className="flex items-center gap-2 bg-white border border-indigo-200 rounded-lg px-3 py-2">
-                <code className="flex-1 text-xs text-gray-600 truncate">{magicLink}</code>
+              <div className="flex items-center gap-2 bg-white border border-indigo-200 rounded-lg px-3 py-2 min-w-0">
+                <code className="flex-1 min-w-0 text-xs text-gray-600 truncate">{magicLink}</code>
                 <button onClick={() => copyLink(magicLink)} className="shrink-0 text-gray-400 hover:text-indigo-600">
                   {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Button variant="outline" onClick={() => copyLink(magicLink)}>
                   {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                   Copiar enlace
@@ -257,11 +410,12 @@ export function Professionals() {
               <Button variant="ghost" className="w-full" onClick={() => { setDialog(false); setMagicLink('') }}>Cerrar</Button>
             </div>
           ) : (
-            <div className="space-y-4">
-              <Tabs defaultValue="datos">
+            <div className="space-y-4 min-w-0">
+              <Tabs defaultValue="datos" className="min-w-0">
                 <TabsList className="mb-3">
                   <TabsTrigger value="datos">Datos</TabsTrigger>
                   <TabsTrigger value="tarifas">Tarifas</TabsTrigger>
+                  {editing && <TabsTrigger value="conocimiento">Conocimiento</TabsTrigger>}
                 </TabsList>
 
                 <TabsContent value="datos" className="space-y-4 mt-0">
@@ -273,7 +427,7 @@ export function Professionals() {
                     <Label>Especialidad</Label>
                     <Input placeholder="Electricista, Fontanero…" value={form.specialty} onChange={e => setForm(f => ({ ...f, specialty: e.target.value }))} />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label>Teléfono</Label>
                       <Input placeholder="600 000 000" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
@@ -283,16 +437,83 @@ export function Professionals() {
                       <Input type="email" placeholder="carlos@email.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
                     </div>
                   </div>
+
+                  {/* Datos de empresa para el PDF del presupuesto */}
+                  <div className="border-t border-gray-100 pt-3 space-y-3">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Datos para presupuestos</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label>Empresa / autónomo</Label>
+                        <Input placeholder="Reformas Carlos S.L." value={form.company_name} onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>NIF / CIF</Label>
+                        <Input placeholder="B12345678" value={form.cif} onChange={e => setForm(f => ({ ...f, cif: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Dirección</Label>
+                      <Input placeholder="Calle Mayor 1, León" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Logo</Label>
+                      <div className="flex items-center gap-3">
+                        {form.logo_url ? (
+                          <div className="relative w-16 h-16 rounded-lg border border-gray-200 overflow-hidden bg-gray-50 flex items-center justify-center">
+                            <img src={form.logo_url} alt="logo" className="max-w-full max-h-full object-contain" />
+                            <button onClick={() => setForm(f => ({ ...f, logo_url: '' }))} className="absolute top-0.5 right-0.5 bg-black/60 text-white rounded-full p-0.5 hover:bg-black/80">
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <label className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:border-primary-400 text-gray-400 hover:text-primary-500">
+                            <input type="file" accept="image/*" className="hidden" onChange={async e => {
+                              const file = e.target.files?.[0]; e.target.value = ''
+                              if (!file) return
+                              try { const url = await logoToDataUrl(file); setForm(f => ({ ...f, logo_url: url })) }
+                              catch { toast.error('No se pudo cargar el logo') }
+                            }} />
+                            <Plus className="h-5 w-5" />
+                          </label>
+                        )}
+                        <p className="text-[11px] text-gray-400 flex-1">Si lo subes, los presupuestos asignados a este profesional saldrán con su logo y datos de empresa.</p>
+                      </div>
+                    </div>
+                  </div>
                   <div className="flex items-center gap-3">
                     <Switch checked={form.is_active} onCheckedChange={v => setForm(f => ({ ...f, is_active: v }))} />
                     <Label>Activo</Label>
                   </div>
-                  <div className="flex items-center gap-3 p-3 bg-indigo-50 rounded-lg border border-indigo-100">
-                    <Switch checked={form.app_access} onCheckedChange={v => setForm(f => ({ ...f, app_access: v }))} />
-                    <div>
-                      <p className="text-sm font-medium text-indigo-800">Acceso a la app</p>
-                      <p className="text-xs text-indigo-500">Genera un enlace único para que vea sus trabajos asignados sin contraseña</p>
+                  <div className="p-3 bg-indigo-50 rounded-lg border border-indigo-100 space-y-2.5">
+                    <div className="flex items-center gap-3">
+                      <Switch checked={form.app_access} onCheckedChange={v => setForm(f => ({ ...f, app_access: v }))} />
+                      <div>
+                        <p className="text-sm font-medium text-indigo-800">Acceso a la app</p>
+                        <p className="text-xs text-indigo-500">Genera un enlace único para que vea sus trabajos asignados sin contraseña</p>
+                      </div>
                     </div>
+                    {/* Enlace ya generado (al editar un profesional con acceso) */}
+                    {editing?.app_access && editing?.magic_token && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2 bg-white border border-indigo-200 rounded-lg px-2.5 py-1.5">
+                          <code className="flex-1 min-w-0 text-[11px] text-gray-600 truncate">{`${window.location.origin}/pro/${editing.magic_token}`}</code>
+                          <button onClick={() => copyLink(`${window.location.origin}/pro/${editing.magic_token}`)} className="shrink-0 text-gray-400 hover:text-indigo-600">
+                            {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                          </button>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button type="button" variant="outline" size="sm" className="gap-1.5 flex-1" onClick={() => copyLink(`${window.location.origin}/pro/${editing.magic_token}`)}>
+                            <Copy className="h-3.5 w-3.5" />Copiar enlace
+                          </Button>
+                          {editing.phone && (
+                            <Button type="button" size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white gap-1.5 flex-1"
+                              onClick={() => sendWhatsApp(editing, `${window.location.origin}/pro/${editing.magic_token}`)}>
+                              📲 WhatsApp
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </TabsContent>
 
@@ -343,14 +564,37 @@ export function Professionals() {
                       </tbody>
                     </table>
                   </div>
-                  <Button variant="outline" size="sm" onClick={addRate} className="gap-1.5"><Plus className="h-3.5 w-3.5" />Añadir tarifa</Button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={addRate} className="gap-1.5"><Plus className="h-3.5 w-3.5" />Añadir tarifa</Button>
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium px-3 h-8 rounded-md border border-gray-200 hover:bg-gray-50 cursor-pointer text-gray-600">
+                      <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={async e => {
+                        const file = e.target.files?.[0]; e.target.value = ''
+                        if (!file) return
+                        try {
+                          const { parseRatesFromFile } = await import('@/lib/sheetParse')
+                          const imported = await parseRatesFromFile(file)
+                          if (!imported.length) { toast.error('No se encontraron tarifas en el archivo'); return }
+                          setForm(f => ({ ...f, rates: [...f.rates, ...imported] }))
+                          toast.success(`${imported.length} tarifa(s) importada(s)`)
+                        } catch { toast.error('No se pudo leer el archivo') }
+                      }} />
+                      <Upload className="h-3.5 w-3.5" />Importar Excel/CSV
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-gray-400">Excel/CSV con columnas: trabajo · precio · unidad (detecta la cabecera automáticamente).</p>
                 </TabsContent>
+
+                {editing && (
+                  <TabsContent value="conocimiento" className="mt-0">
+                    <ProKnowledgeManager professionalId={editing.id} orgId={organization!.id} />
+                  </TabsContent>
+                )}
               </Tabs>
 
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setDialog(false)}>Cancelar</Button>
-                <Button onClick={handleSave} disabled={saving || !form.name.trim()}>
-                  {saving ? 'Guardando…' : form.app_access ? 'Guardar y generar enlace' : 'Guardar'}
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={() => setDialog(false)} className="w-full">Cancelar</Button>
+                <Button onClick={handleSave} disabled={saving || !form.name.trim()} className="w-full">
+                  {saving ? 'Guardando…' : 'Guardar'}
                 </Button>
               </div>
             </div>

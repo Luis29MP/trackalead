@@ -16,13 +16,14 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import {
   User, Building2, Lock, Globe, Link, Check,
-  Trash2, Plus, Users, Star, CreditCard,
+  Trash2, Plus, Users, Star, CreditCard, Sparkles,
 } from 'lucide-react'
 import { getInitials, formatDate } from '@/lib/utils'
+import { AiIntegrations } from '@/components/settings/AiIntegrations'
 import type { OrgMember, Profile, UserRole } from '@/types'
 
 const ROLE_LABEL: Record<string, string> = {
-  owner: 'Propietario', admin: 'Administrador', manager: 'Gestor', installer: 'Instalador',
+  owner: 'Propietario', admin: 'Administrador', manager: 'Colaborador', installer: 'Instalador',
 }
 const ROLE_COLOR: Record<string, string> = {
   owner: 'bg-amber-100 text-amber-700', admin: 'bg-purple-100 text-purple-700',
@@ -49,6 +50,7 @@ export function Settings() {
   const [creatingOrg, setCreatingOrg] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deletingOrg, setDeletingOrg] = useState(false)
+  const [myOrgs, setMyOrgs] = useState<{ id: string; name: string }[]>([])
 
   // ── Seguridad ───────────────────────────────────────────────────────────────
   const [pwForm, setPwForm] = useState({ password: '', confirm: '' })
@@ -61,6 +63,28 @@ export function Settings() {
     if (profile) setProfileForm({ full_name: profile.full_name ?? '' })
     if (organization) { setOrgName(organization.name); loadMembers() }
   }, [profile?.id, organization?.id])
+
+  useEffect(() => {
+    if (user) loadMyOrgs()
+  }, [user?.id])
+
+  async function loadMyOrgs() {
+    if (!user) return
+    const { data } = await supabase
+      .from('org_members')
+      .select('organization:organizations(id, name)')
+      .eq('user_id', user.id)
+    const orgs = (data ?? [])
+      .map((m: Record<string, unknown>) => m.organization as { id: string; name: string })
+      .filter(Boolean)
+    setMyOrgs(orgs)
+  }
+
+  function switchOrg(orgId: string) {
+    if (orgId === organization?.id) return
+    localStorage.setItem('selected_org_id', orgId)
+    window.location.reload()
+  }
 
   async function loadMembers() {
     if (!organization) return
@@ -169,19 +193,62 @@ export function Settings() {
 
       <Tabs defaultValue="org">
         <TabsList className="mb-6">
-          <TabsTrigger value="org"><Building2 className="h-3.5 w-3.5 mr-1.5" />Organización</TabsTrigger>
+          <TabsTrigger value="org"><Building2 className="h-3.5 w-3.5 mr-1.5" />Organizaciones</TabsTrigger>
           <TabsTrigger value="subscription"><CreditCard className="h-3.5 w-3.5 mr-1.5" />Suscripción</TabsTrigger>
           <TabsTrigger value="profile"><User className="h-3.5 w-3.5 mr-1.5" />Perfil</TabsTrigger>
           <TabsTrigger value="security"><Lock className="h-3.5 w-3.5 mr-1.5" />Seguridad</TabsTrigger>
+          <TabsTrigger value="ai"><Sparkles className="h-3.5 w-3.5 mr-1.5" />Integraciones IA</TabsTrigger>
           <TabsTrigger value="api"><Globe className="h-3.5 w-3.5 mr-1.5" />API</TabsTrigger>
         </TabsList>
 
-        {/* ── ORGANIZACIÓN ─────────────────────────────────────────────────── */}
+        {/* ── ORGANIZACIONES ───────────────────────────────────────────────── */}
         <TabsContent value="org" className="space-y-5">
+          {/* Mis organizaciones (del usuario) */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Building2 className="h-4 w-4" />Mis organizaciones ({myOrgs.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <p className="text-xs text-gray-400 -mt-1 mb-1">Todas tus organizaciones bajo tu cuenta ({user?.email}). Cada una tiene sus propios tableros, leads y equipo.</p>
+              {myOrgs.map((o) => {
+                const active = o.id === organization?.id
+                return (
+                  <div key={o.id} className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 ${active ? 'border-primary-300 bg-primary-50' : 'border-gray-100'}`}>
+                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                      {o.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{o.name}</p>
+                      {active && <p className="text-[11px] text-primary-600 font-medium">Organización activa</p>}
+                    </div>
+                    {active ? (
+                      <Badge className="bg-primary-100 text-primary-700 text-xs">Activa</Badge>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => switchOrg(o.id)}>Cambiar a esta</Button>
+                    )}
+                  </div>
+                )
+              })}
+              {showNewOrg ? (
+                <div className="flex gap-2 pt-1">
+                  <Input placeholder="Nombre de la nueva organización" value={newOrgName} onChange={(e) => setNewOrgName(e.target.value)} autoFocus />
+                  <Button onClick={handleCreateOrg} disabled={creatingOrg || !newOrgName.trim()}>{creatingOrg ? 'Creando…' : 'Crear'}</Button>
+                  <Button variant="outline" onClick={() => { setShowNewOrg(false); setNewOrgName('') }}>Cancelar</Button>
+                </div>
+              ) : (
+                <Button variant="outline" className="w-full gap-1.5 mt-1" onClick={() => setShowNewOrg(true)}>
+                  <Plus className="h-4 w-4" />Nueva organización
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Nombre */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Información de la organización</CardTitle>
+              <CardTitle className="text-sm">Información de la organización activa</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-1.5">
@@ -244,7 +311,7 @@ export function Settings() {
                             <SelectTrigger className="h-7 w-36 text-xs"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="admin">Administrador</SelectItem>
-                              <SelectItem value="manager">Gestor</SelectItem>
+                              <SelectItem value="manager">Colaborador</SelectItem>
                               <SelectItem value="installer">Instalador</SelectItem>
                             </SelectContent>
                           </Select>
@@ -266,42 +333,9 @@ export function Settings() {
               {isOwner && (
                 <div className="px-5 py-3 border-t border-gray-100">
                   <p className="text-xs text-gray-400">
-                    Comparte el enlace de invitación con quien quieras añadir. Al acceder y aceptar, se unirán como Gestor (puedes cambiar el rol después).
+                    Comparte el enlace de invitación con quien quieras añadir. Al acceder y aceptar, se unirán como Colaborador (control casi total; puedes cambiar el rol después).
                   </p>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Nueva organización */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Crear otra organización</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-gray-500 mb-3">
-                Puedes tener varias organizaciones. Útil si gestionas más de una empresa.
-              </p>
-              {showNewOrg ? (
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Nombre de la nueva organización"
-                    value={newOrgName}
-                    onChange={(e) => setNewOrgName(e.target.value)}
-                    autoFocus
-                  />
-                  <Button onClick={handleCreateOrg} disabled={creatingOrg || !newOrgName.trim()}>
-                    {creatingOrg ? 'Creando…' : 'Crear'}
-                  </Button>
-                  <Button variant="outline" onClick={() => { setShowNewOrg(false); setNewOrgName('') }}>
-                    Cancelar
-                  </Button>
-                </div>
-              ) : (
-                <Button variant="outline" onClick={() => setShowNewOrg(true)}>
-                  <Plus className="h-4 w-4" />
-                  Nueva organización
-                </Button>
               )}
             </CardContent>
           </Card>
@@ -435,6 +469,11 @@ export function Settings() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ── INTEGRACIONES IA ─────────────────────────────────────────────── */}
+        <TabsContent value="ai" className="space-y-5">
+          <AiIntegrations />
         </TabsContent>
 
         {/* ── API / WEBHOOK ────────────────────────────────────────────────── */}
