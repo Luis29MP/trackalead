@@ -37,11 +37,29 @@ export function useBoards() {
         .eq('org_id', organization!.id)
         .order('created_at', { ascending: false })
       const list = data ?? []
+      const boardIds = list.map(b => b.id)
 
-      // Resumen por tablero: total de leads activos y nuevos (últimas 48 h)
+      if (boardIds.length === 0) { setBoards([]); return }
+
+      // Columna de "nuevos leads" de cada tablero: la que se llama "Nuevo(s) lead(s)"
+      // (match por nombre); si no hay, la primera por posición (lista de entrada).
+      const { data: cols } = await supabase
+        .from('board_columns')
+        .select('id, board_id, name, position')
+        .in('board_id', boardIds)
+      const colsByBoard: Record<string, { id: string; name: string; position: number }[]> = {}
+      for (const c of cols ?? []) (colsByBoard[c.board_id] ??= []).push(c)
+      const newColByBoard: Record<string, string | undefined> = {}
+      for (const b of list) {
+        const bcols = (colsByBoard[b.id] ?? []).slice().sort((a, z) => a.position - z.position)
+        const match = bcols.find(c => /nuevo/i.test(c.name)) ?? bcols[0]
+        newColByBoard[b.id] = match?.id
+      }
+
+      // Resumen por tablero: total de leads activos y nuevos (en la lista de nuevos, últimas 48 h)
       const { data: leads } = await supabase
         .from('leads')
-        .select('board_id, created_at')
+        .select('board_id, column_id, created_at')
         .eq('org_id', organization!.id)
         .eq('is_archived', false)
       const cutoff = Date.now() - 48 * 60 * 60 * 1000
@@ -49,7 +67,7 @@ export function useBoards() {
       for (const l of leads ?? []) {
         const s = (stats[l.board_id] ??= { total: 0, nuevos: 0 })
         s.total++
-        if (new Date(l.created_at).getTime() >= cutoff) s.nuevos++
+        if (l.column_id === newColByBoard[l.board_id] && new Date(l.created_at).getTime() >= cutoff) s.nuevos++
       }
 
       setBoards(list.map(b => ({
