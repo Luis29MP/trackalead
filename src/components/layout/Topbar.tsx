@@ -1,32 +1,74 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, Bell, Radar, CheckCheck } from 'lucide-react'
+import { Search, Bell, Radar, CheckCheck, Phone, MapPin, Wrench } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/context/AuthContext'
 import { useNotifications } from '@/hooks/useNotifications'
 import { formatRelativeTime } from '@/lib/utils'
+
+interface LeadLite {
+  id: string
+  name: string | null
+  phone: string | null
+  concept: string | null
+  zone: string | null
+}
 
 export function Topbar() {
   const [search, setSearch] = useState('')
   const [notifOpen, setNotifOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const notifRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
+  const { organization } = useAuth()
   const { notifications, unreadCount, markRead, markAllRead } = useNotifications()
 
-  // Cerrar dropdown al click fuera
+  // Cargar todos los leads activos de la org en memoria (búsqueda instantánea y por teléfono)
+  const [allLeads, setAllLeads] = useState<LeadLite[]>([])
+  useEffect(() => {
+    if (!organization?.id) { setAllLeads([]); return }
+    supabase.from('leads')
+      .select('id, name, phone, concept, zone')
+      .eq('org_id', organization.id)
+      .eq('is_archived', false)
+      .then(({ data }) => setAllLeads((data ?? []) as LeadLite[]))
+  }, [organization?.id])
+
+  // Filtro: por nombre/concepto/zona (texto) y por teléfono comparando solo dígitos
+  const results = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (q.length < 2) return []
+    const qDigits = q.replace(/\D/g, '')
+    return allLeads.filter(l => {
+      if (l.name?.toLowerCase().includes(q)) return true
+      if (l.concept?.toLowerCase().includes(q)) return true
+      if (l.zone?.toLowerCase().includes(q)) return true
+      if (qDigits.length >= 3 && (l.phone?.replace(/\D/g, '') ?? '').includes(qDigits)) return true
+      return false
+    }).slice(0, 8)
+  }, [search, allLeads])
+
+  // Cerrar dropdowns al click fuera
   useEffect(() => {
     function handler(e: MouseEvent) {
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
-        setNotifOpen(false)
-      }
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false)
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setSearchOpen(false)
     }
-    if (notifOpen) document.addEventListener('mousedown', handler)
+    document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [notifOpen])
+  }, [])
+
+  function goToLead(id: string) {
+    setSearch(''); setSearchOpen(false)
+    navigate(`/leads/${id}`)
+  }
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
-    if (search.trim()) navigate(`/boards?q=${encodeURIComponent(search)}`)
+    if (results.length > 0) goToLead(results[0].id)   // Enter → primer resultado
   }
 
   function handleNotifClick(n: { id: string; body: string; calendar_event_id?: string | null }) {
@@ -60,17 +102,45 @@ export function Topbar() {
 
       {/* ── Versión escritorio ───────────────────────────────────────── */}
       <div className="hidden md:flex items-center gap-4 px-6" style={{ height: 56 }}>
-        <form onSubmit={handleSearch} className="flex-1 flex justify-center">
-          <div className="relative w-full max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-            <Input
-              placeholder="Buscar leads, tableros..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="pl-9 h-8 text-sm bg-gray-50 border-gray-200 focus:bg-white"
-            />
+        <div className="flex-1 flex justify-center">
+          <div className="relative w-full max-w-md" ref={searchRef}>
+            <form onSubmit={handleSearch}>
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+              <Input
+                placeholder="Buscar por teléfono, nombre, trabajo o zona…"
+                value={search}
+                onChange={e => { setSearch(e.target.value); setSearchOpen(true) }}
+                onFocus={() => setSearchOpen(true)}
+                className="pl-9 h-8 text-sm bg-gray-50 border-gray-200 focus:bg-white"
+              />
+            </form>
+
+            {searchOpen && search.trim().length >= 2 && (
+              <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                {results.length === 0 ? (
+                  <p className="text-center text-sm text-gray-400 py-6">Sin resultados para "{search}"</p>
+                ) : (
+                  <div className="max-h-96 overflow-y-auto">
+                    {results.map(l => (
+                      <button
+                        key={l.id}
+                        onClick={() => goToLead(l.id)}
+                        className="w-full text-left px-3 py-2.5 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
+                      >
+                        <p className="text-sm font-medium text-gray-900 truncate">{l.name || 'Lead'}</p>
+                        <div className="flex items-center gap-2.5 text-[11px] text-gray-400 mt-0.5 flex-wrap">
+                          {l.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{l.phone}</span>}
+                          {l.concept && <span className="flex items-center gap-1"><Wrench className="h-3 w-3" />{l.concept}</span>}
+                          {l.zone && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{l.zone}</span>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        </form>
+        </div>
 
         {/* Campana con badge */}
         <div className="relative shrink-0" ref={notifRef}>

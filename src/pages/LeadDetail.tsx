@@ -5,7 +5,7 @@ import {
   MessageSquare, Activity, User, DollarSign, CheckCircle, Clock,
   Trash2, Wrench, Building2, MessageCircle, ChevronRight, Calendar,
   AlertCircle, Share2, Link, Copy, Check, Trash,
-  CalendarPlus, Home, PhoneCall, RefreshCw, ClipboardList, FileText, Download,
+  CalendarPlus, Home, PhoneCall, RefreshCw, ClipboardList, FileText, Download, Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
@@ -29,6 +29,7 @@ import {
 } from '@/lib/utils'
 import { exportBudgetPdf, type PdfOrgInfo } from '@/lib/budgetPdf'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
+import { BudgetWizard, emptyDraft, type Draft } from './Budgets'
 import type { BoardColumn, CalendarEvent, EventType, LeadComment, LeadActivity, LeadFile, Professional, Budget } from '@/types'
 
 const BUDGET_STATUS: Record<string, { label: string; color: string }> = {
@@ -217,6 +218,7 @@ export function LeadDetail() {
   const [files,        setFiles]        = useState<LeadFile[]>([])
   const [professionals,setProfessionals] = useState<Professional[]>([])
   const [leadBudgets,  setLeadBudgets]   = useState<Budget[]>([])
+  const [budgetWizard, setBudgetWizard]  = useState<Draft | null>(null)
   const [columns,      setColumns]      = useState<BoardColumn[]>([])
   const [newComment,   setNewComment]   = useState('')
   const [uploading,    setUploading]    = useState(false)
@@ -329,6 +331,20 @@ export function LeadDetail() {
   }
   function exportBudget(b: Budget) {
     exportBudgetPdf(b, budgetIssuer(b))
+  }
+
+  // Abre el asistente de presupuesto con los datos del lead ya rellenados
+  function openBudgetWizard() {
+    if (!lead) return
+    setBudgetWizard({
+      ...emptyDraft(),
+      lead_id: lead.id,
+      client_name: lead.name ?? '',
+      client_phone: lead.phone ?? '',
+      client_address: lead.address || lead.zone || '',
+      concept: lead.concept ?? '',
+      work_notes: lead.notes ?? '',
+    })
   }
   async function budgetWhatsApp(b: Budget) {
     const win = window.open('', '_blank')  // abrir ya para evitar bloqueo de popup
@@ -888,11 +904,17 @@ export function LeadDetail() {
 
             {/* ── Presupuestos ─────────────────────────────────────────── */}
             <TabsContent value="budgets" className="mt-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium text-gray-700">Presupuestos del cliente</p>
+                <Button size="sm" onClick={openBudgetWizard} className="gap-1.5 text-xs">
+                  <Sparkles className="h-3.5 w-3.5" />Crear presupuesto
+                </Button>
+              </div>
               {leadBudgets.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
                   <FileText className="h-8 w-8 mx-auto mb-2 opacity-30" />
                   <p className="text-sm">Sin presupuestos para este cliente</p>
-                  <button className="mt-2 text-xs text-primary-600" onClick={() => navigate('/budgets')}>Ir a Presupuestos →</button>
+                  <button className="mt-2 text-xs text-primary-600" onClick={openBudgetWizard}>Crear el primer presupuesto →</button>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -1563,6 +1585,20 @@ export function LeadDetail() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Asistente de presupuesto (desde la ficha del lead) */}
+      {budgetWizard && organization && (
+        <BudgetWizard
+          initial={budgetWizard}
+          leads={lead ? [lead] : []}
+          professionals={professionals}
+          orgId={organization.id}
+          userId={user?.id ?? null}
+          orgName={organization.name}
+          onClose={() => setBudgetWizard(null)}
+          onSaved={() => loadRelated()}
+        />
+      )}
     </div>
   )
 }

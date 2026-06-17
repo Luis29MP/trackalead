@@ -55,7 +55,7 @@ const STATUS_META: Record<BudgetStatus, { label: string; color: string }> = {
   rejected: { label: 'Rechazado',color: 'bg-red-100 text-red-700' },
 }
 
-interface Draft {
+export interface Draft {
   id?: string
   lead_id: string | null
   client_name: string
@@ -74,7 +74,7 @@ interface Draft {
   images: ImgItem[]
 }
 
-function emptyDraft(): Draft {
+export function emptyDraft(): Draft {
   return {
     lead_id: null, client_name: '', client_phone: '', client_address: '', concept: '',
     work_notes: '', professional_id: null, margin_percent: 20, ai_instructions: '',
@@ -325,7 +325,7 @@ export function Budgets() {
 }
 
 // ── Asistente de generación (4 pasos) ──────────────────────────────────────────
-function BudgetWizard({ initial, leads, professionals, orgId, userId, orgName, onClose, onSaved }: {
+export function BudgetWizard({ initial, leads, professionals, orgId, userId, orgName, onClose, onSaved }: {
   initial: Draft
   leads: Lead[]
   professionals: Professional[]
@@ -335,8 +335,8 @@ function BudgetWizard({ initial, leads, professionals, orgId, userId, orgName, o
   onClose: () => void
   onSaved: () => void
 }) {
-  // Si viene con líneas (edición), empezamos en el paso 3
-  const [step, setStep] = useState(initial.lines.length > 0 || initial.id ? 3 : 1)
+  // Edición → paso 3; si ya trae un lead preseleccionado (desde la ficha) → paso 2; si no → paso 1
+  const [step, setStep] = useState(initial.lines.length > 0 || initial.id ? 3 : initial.lead_id ? 2 : 1)
   const [draft, setDraft] = useState<Draft>(initial)
   const [leadSearch, setLeadSearch] = useState('')
   const [generating, setGenerating] = useState(false)
