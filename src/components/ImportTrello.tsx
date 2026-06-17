@@ -50,16 +50,58 @@ function parseTrello(raw: unknown): Parsed {
   return { boardName: data.name ?? 'Tablero de Trello', lists, cards, checklistsByCard, checklistTotal }
 }
 
-// Notas del lead: descripción + etiquetas + vencimiento de la tarjeta de Trello
+// Extrae el valor de un campo etiquetado de la descripción (p. ej. "Teléfono: ...")
+function field(desc: string, label: RegExp): string | null {
+  const m = desc.match(label)
+  return m ? m[1].trim() : null
+}
+
+// Datos estructurados que intentamos sacar de la tarjeta (formato habitual de captación)
+interface CardMeta {
+  phone: string | null
+  zone: string | null
+  concept: string | null
+  createdAt: string | null
+}
+function parseCardMeta(card: TrelloCard): CardMeta {
+  const desc = card.desc ?? ''
+  const hay = `${card.name}\n${desc}`
+
+  // Teléfono: por etiqueta, y si no, primer número de teléfono que aparezca
+  let phone = field(desc, /Tel[eé]fono:\s*([^\n\r]+)/i)
+  if (phone) phone = phone.replace(/\(.*$/, '').trim()
+  if (!phone) {
+    const m = hay.match(/(\+?\d[\d\s]{7,}\d)/)
+    phone = m ? m[1].trim() : null
+  }
+
+  const zoneRaw = field(desc, /Zona:\s*([^\n\r]+)/i)
+  const zone = zoneRaw && zoneRaw !== '—' ? zoneRaw : null
+  const concept = field(desc, /Tipo de trabajo:\s*([^\n\r]+)/i)
+
+  // Fecha real del lead: "FECHA: dd/mm/aa" → ISO; si no, el vencimiento de Trello
+  let createdAt: string | null = null
+  const fm = desc.match(/FECHA:\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})/i)
+  if (fm) {
+    const [, dd, mm, yy] = fm
+    const year = yy.length === 2 ? 2000 + parseInt(yy, 10) : parseInt(yy, 10)
+    const d = new Date(year, parseInt(mm, 10) - 1, parseInt(dd, 10), 12, 0, 0)
+    if (!isNaN(d.getTime())) createdAt = d.toISOString()
+  } else if (card.due) {
+    const d = new Date(card.due)
+    if (!isNaN(d.getTime())) createdAt = d.toISOString()
+  }
+
+  return { phone, zone, concept, createdAt }
+}
+
+// Notas del lead: descripción (sin la línea de FECHA) + etiquetas de Trello
 function buildNotes(card: TrelloCard): string | null {
   const parts: string[] = []
-  if (card.desc?.trim()) parts.push(card.desc.trim())
+  const desc = (card.desc ?? '').replace(/FECHA:[^\n\r]*\r?\n?/gi, '').trim()
+  if (desc) parts.push(desc)
   const labels = (card.labels ?? []).map(l => l.name?.trim() || l.color).filter(Boolean)
   if (labels.length) parts.push('🏷️ Etiquetas: ' + labels.join(', '))
-  if (card.due) {
-    const d = new Date(card.due)
-    if (!isNaN(d.getTime())) parts.push('📅 Vencimiento: ' + d.toLocaleString('es-ES'))
-  }
   return parts.length ? parts.join('\n\n') : null
 }
 
@@ -148,15 +190,20 @@ export function ImportTrello({
     for (let i = 0; i < cards.length; i++) {
       const card = cards[i]
       const title = card.name?.trim() || '(sin título)'
+      const meta = parseCardMeta(card)
       const { data: lead, error } = await supabase.from('leads').insert({
         board_id: boardId,
         org_id: organization.id,
         column_id: colMap[card.idList],
         title,
         name: title,
+        phone: meta.phone,
+        zone: meta.zone,
+        concept: meta.concept,
         notes: buildNotes(card),
         source: 'form',
         is_read: true,
+        ...(meta.createdAt ? { created_at: meta.createdAt } : {}),
       }).select('id').single()
 
       if (error || !lead) {
