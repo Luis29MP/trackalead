@@ -183,8 +183,16 @@ export function SABilling() {
     setDeleting(true)
     const { data, error } = await supabase.functions.invoke('sa-delete-user', { body: { target_user_id: owner.user_id } })
     setDeleting(false)
-    const errMsg = error?.message ?? (data as { error?: string } | null)?.error
-    if (errMsg) { toast.error(errMsg); return }
+    // supabase-js envuelve el error en FunctionsHttpError; el mensaje real va en error.context (Response)
+    let errMsg: string | undefined = (data as { error?: string } | null)?.error
+    if (error) {
+      errMsg = error.message
+      const ctx = (error as { context?: Response }).context
+      if (ctx && typeof ctx.json === 'function') {
+        try { const body = await ctx.json(); if (body?.error) errMsg = body.error } catch { /* respuesta sin JSON */ }
+      }
+    }
+    if (errMsg) { toast.error(errMsg); console.error('[sa-delete-user] error →', errMsg, error); return }
     toast.success('Usuario eliminado')
     setOwners(prev => prev.filter(o => o.user_id !== owner.user_id))
     setAction(null)
