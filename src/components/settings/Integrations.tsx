@@ -32,6 +32,8 @@ export function Integrations() {
   const [savingWa, setSavingWa] = useState(false)
   const [savingGc, setSavingGc] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [testNumber, setTestNumber] = useState('')
+  const [testing, setTesting] = useState(false)
 
   // filas guardadas por proveedor (para el estado de conexión)
   const [rows, setRows] = useState<Record<string, { is_active: boolean; config: Record<string, unknown> } | undefined>>({})
@@ -131,6 +133,25 @@ export function Integrations() {
     }, !!gcal.calendar_id.trim() || gcal.recipients.length > 0, setSavingGc)
   }
 
+  // Envía un WhatsApp real con la config GUARDADA → confirma que las credenciales funcionan
+  async function testSend() {
+    if (!organization) return
+    if (!testNumber.trim()) { toast.error('Escribe un número de prueba (con prefijo, ej: 34612345678)'); return }
+    setTesting(true)
+    const { data, error } = await supabase.functions.invoke('whatsapp-send', {
+      body: { org_id: organization.id, to: testNumber.trim(), message: '✅ Prueba de TrackALead: tu WhatsApp está conectado correctamente.' },
+    })
+    setTesting(false)
+    let errMsg: string | undefined = (data as { error?: string } | null)?.error
+    if (error) {
+      errMsg = error.message
+      const ctx = (error as { context?: Response }).context
+      if (ctx && typeof ctx.json === 'function') { try { const b = await ctx.json(); if (b?.error) errMsg = b.error } catch { /* sin json */ } }
+    }
+    if (errMsg) toast.error(`No se pudo enviar: ${errMsg}`, { duration: 8000 })
+    else toast.success(`Mensaje enviado a ${testNumber.trim()} vía ${(data as { provider?: string })?.provider === 'meta_whatsapp' ? 'Meta' : 'Evolution'}. Revisa el WhatsApp.`)
+  }
+
   function copyCallback() {
     navigator.clipboard.writeText(CALLBACK_URL)
     setCopied(true); setTimeout(() => setCopied(false), 1500)
@@ -221,6 +242,19 @@ export function Integrations() {
           <Button onClick={saveWhatsApp} disabled={savingWa} className="gap-1.5">
             <ShieldCheck className="h-4 w-4" />{savingWa ? 'Guardando…' : 'Guardar y validar'}
           </Button>
+
+          {/* Prueba real de envío: confirma que las credenciales funcionan */}
+          <div className="border-t border-gray-100 pt-3 space-y-2">
+            <Label className="text-xs flex items-center gap-1.5"><MessageCircle className="h-3.5 w-3.5 text-emerald-500" />Probar conexión (envío real)</Label>
+            <p className="text-[11px] text-gray-400">Guarda primero. Luego envía un WhatsApp de prueba a tu propio número para confirmar que las credenciales son correctas.</p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input placeholder="Tu número con prefijo (ej: 34612345678)" value={testNumber} onChange={e => setTestNumber(e.target.value)} className="flex-1" />
+              <Button variant="outline" onClick={testSend} disabled={testing || !waRow?.is_active} className="gap-1.5 shrink-0">
+                <MessageCircle className="h-4 w-4" />{testing ? 'Enviando…' : 'Enviar prueba'}
+              </Button>
+            </div>
+            {!waRow?.is_active && <p className="text-[11px] text-amber-500">Guarda la integración antes de poder probar el envío.</p>}
+          </div>
         </CardContent>
       </Card>
 
