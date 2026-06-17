@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { DollarSign, AlertTriangle, Calendar, Gift, XCircle, Building2, Layers, Database, Star, Search, X } from 'lucide-react'
+import { DollarSign, AlertTriangle, Calendar, Gift, XCircle, Building2, Layers, Database, Star, Search, X, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
@@ -170,6 +170,23 @@ export function SABilling() {
   async function reactivate(owner: OwnerSub) {
     await setStatus(owner, 'active', { next_billing_at: new Date(Date.now() + 30 * 86400_000).toISOString() })
     toast.success('Suscripción reactivada')
+    setAction(null)
+  }
+
+  const [deleting, setDeleting] = useState(false)
+  async function deleteUser(owner: OwnerSub) {
+    const typed = window.prompt(
+      `⚠️ ELIMINAR USUARIO — ACCIÓN IRREVERSIBLE\n\nSe eliminará la cuenta de ${owner.email ?? 'este usuario'} y TODAS las organizaciones que posee, con todos sus datos (tableros, leads, presupuestos, profesionales, etc.).\n\nEscribe el email exacto para confirmar:`
+    )
+    if (typed === null) return
+    if (typed.trim().toLowerCase() !== (owner.email ?? '').toLowerCase()) { toast.error('El email no coincide. Cancelado.'); return }
+    setDeleting(true)
+    const { data, error } = await supabase.functions.invoke('sa-delete-user', { body: { target_user_id: owner.user_id } })
+    setDeleting(false)
+    const errMsg = error?.message ?? (data as { error?: string } | null)?.error
+    if (errMsg) { toast.error(errMsg); return }
+    toast.success('Usuario eliminado')
+    setOwners(prev => prev.filter(o => o.user_id !== owner.user_id))
     setAction(null)
   }
 
@@ -395,6 +412,22 @@ export function SABilling() {
                     <XCircle className="h-4 w-4" />Suspender usuario
                   </Button>
                 )}
+              </div>
+
+              {/* Zona peligrosa: eliminar usuario por completo */}
+              <div className="space-y-2 border-2 border-red-200 bg-red-50/60 rounded-lg p-3">
+                <p className="text-sm font-semibold text-red-700 flex items-center gap-1.5"><Trash2 className="h-3.5 w-3.5" />Eliminar usuario</p>
+                <p className="text-xs text-red-600/80">
+                  Borra la cuenta y <strong>todas</strong> las organizaciones que posee con sus datos. Irreversible.
+                </p>
+                <Button
+                  variant="outline"
+                  className="w-full text-red-600 border-red-300 hover:bg-red-100 gap-1.5"
+                  disabled={deleting}
+                  onClick={() => deleteUser(action)}
+                >
+                  <Trash2 className="h-4 w-4" />{deleting ? 'Eliminando…' : 'Eliminar usuario definitivamente'}
+                </Button>
               </div>
             </div>
           )}
