@@ -16,10 +16,11 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import {
   User, Building2, Lock, Globe, Link, Check,
-  Trash2, Plus, Users, Star, CreditCard, Sparkles,
+  Trash2, Plus, Users, Star, CreditCard, Sparkles, Plug,
 } from 'lucide-react'
 import { getInitials, formatDate } from '@/lib/utils'
 import { AiIntegrations } from '@/components/settings/AiIntegrations'
+import { Integrations } from '@/components/settings/Integrations'
 import type { OrgMember, Profile, UserRole } from '@/types'
 
 const ROLE_LABEL: Record<string, string> = {
@@ -198,6 +199,7 @@ export function Settings() {
           <TabsTrigger value="profile"><User className="h-3.5 w-3.5 mr-1.5" />Perfil</TabsTrigger>
           <TabsTrigger value="security"><Lock className="h-3.5 w-3.5 mr-1.5" />Seguridad</TabsTrigger>
           <TabsTrigger value="ai"><Sparkles className="h-3.5 w-3.5 mr-1.5" />Integraciones IA</TabsTrigger>
+          <TabsTrigger value="integrations"><Plug className="h-3.5 w-3.5 mr-1.5" />Integraciones</TabsTrigger>
           <TabsTrigger value="api"><Globe className="h-3.5 w-3.5 mr-1.5" />API</TabsTrigger>
         </TabsList>
 
@@ -474,6 +476,10 @@ export function Settings() {
         {/* ── INTEGRACIONES IA ─────────────────────────────────────────────── */}
         <TabsContent value="ai" className="space-y-5">
           <AiIntegrations />
+        </TabsContent>
+
+        <TabsContent value="integrations" className="space-y-5">
+          <Integrations />
         </TabsContent>
 
         {/* ── API / WEBHOOK ────────────────────────────────────────────────── */}
