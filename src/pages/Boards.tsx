@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Globe, Layers, Check } from 'lucide-react'
+import { Plus, Globe, Layers, Check, Trash2, Users, Sparkles } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { useBoards, STANDARD_COLUMNS } from '@/hooks/useBoards'
@@ -25,7 +25,7 @@ interface BoardFormData {
 }
 
 export function Boards() {
-  const { boards, loading, createBoard } = useBoards()
+  const { boards, loading, createBoard, deleteBoard } = useBoards()
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [selectedColor, setSelectedColor] = useState(BOARD_COLORS[0])
@@ -65,6 +65,19 @@ export function Boards() {
       toast.error('Error al crear tablero')
     } finally {
       setCreating(false)
+    }
+  }
+
+  async function handleDelete(board: Board) {
+    const n = board.lead_count ?? 0
+    if (!window.confirm(
+      `¿Eliminar el tablero "${board.name}"?\n\nSe borrarán también sus ${n} lead(s) y todas sus listas, comentarios y archivos. Esta acción es irreversible.`
+    )) return
+    try {
+      await deleteBoard(board.id)
+      toast.success(`Tablero "${board.name}" eliminado`)
+    } catch {
+      toast.error('No se pudo eliminar el tablero')
     }
   }
 
@@ -197,7 +210,12 @@ export function Boards() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {boards.map((board) => (
-            <BoardCard key={board.id} board={board} onClick={() => navigate(`/boards/${board.id}`)} />
+            <BoardCard
+              key={board.id}
+              board={board}
+              onClick={() => navigate(`/boards/${board.id}`)}
+              onDelete={() => handleDelete(board)}
+            />
           ))}
         </div>
       )}
@@ -205,26 +223,48 @@ export function Boards() {
   )
 }
 
-function BoardCard({ board, onClick }: { board: Board; onClick: () => void }) {
+function BoardCard({ board, onClick, onDelete }: { board: Board; onClick: () => void; onDelete: () => void }) {
+  const total = board.lead_count ?? 0
+  const nuevos = board.new_count ?? 0
   return (
     <Card
-      className="cursor-pointer hover:shadow-md transition-shadow border-l-4"
+      className="group cursor-pointer hover:shadow-md transition-shadow border-l-4"
       style={{ borderLeftColor: board.color }}
       onClick={onClick}
     >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-base leading-tight">{board.name}</CardTitle>
-          <div
-            className="w-3 h-3 rounded-full shrink-0 mt-0.5"
-            style={{ backgroundColor: board.color }}
-          />
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete() }}
+              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-gray-300 hover:text-red-600 hover:bg-red-50"
+              title="Eliminar tablero"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+            <div className="w-3 h-3 rounded-full mt-0.5" style={{ backgroundColor: board.color }} />
+          </div>
         </div>
         {board.description && (
           <p className="text-sm text-gray-500 line-clamp-2">{board.description}</p>
         )}
       </CardHeader>
-      <CardContent className="pt-0">
+      <CardContent className="pt-0 space-y-3">
+        {/* Resumen: total de leads + nuevos (48 h) */}
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 text-slate-700 px-2.5 py-1 text-xs font-semibold">
+            <Users className="h-3.5 w-3.5 text-slate-400" />{total} {total === 1 ? 'lead' : 'leads'}
+          </span>
+          {nuevos > 0 ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-50 text-primary-700 px-2.5 py-1 text-xs font-semibold ring-1 ring-primary-200">
+              <Sparkles className="h-3.5 w-3.5" />{nuevos} {nuevos === 1 ? 'nuevo' : 'nuevos'} · 48 h
+            </span>
+          ) : (
+            <span className="text-[11px] text-gray-400">Sin nuevos (48 h)</span>
+          )}
+        </div>
+
         <div className="flex items-center gap-4 text-xs text-gray-400">
           {board.website_url && (
             <div className="flex items-center gap-1">

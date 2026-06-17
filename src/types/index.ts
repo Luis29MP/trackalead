@@ -66,7 +66,8 @@ export interface Board {
   color: string
   created_at: string
   columns?: BoardColumn[]
-  lead_count?: number
+  lead_count?: number      // total de leads activos del tablero
+  new_count?: number       // leads nuevos (creados en las últimas 48 h)
 }
 
 export interface BoardColumn {

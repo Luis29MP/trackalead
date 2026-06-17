@@ -36,12 +36,39 @@ export function useBoards() {
         .select('*')
         .eq('org_id', organization!.id)
         .order('created_at', { ascending: false })
-      setBoards(data ?? [])
+      const list = data ?? []
+
+      // Resumen por tablero: total de leads activos y nuevos (últimas 48 h)
+      const { data: leads } = await supabase
+        .from('leads')
+        .select('board_id, created_at')
+        .eq('org_id', organization!.id)
+        .eq('is_archived', false)
+      const cutoff = Date.now() - 48 * 60 * 60 * 1000
+      const stats: Record<string, { total: number; nuevos: number }> = {}
+      for (const l of leads ?? []) {
+        const s = (stats[l.board_id] ??= { total: 0, nuevos: 0 })
+        s.total++
+        if (new Date(l.created_at).getTime() >= cutoff) s.nuevos++
+      }
+
+      setBoards(list.map(b => ({
+        ...b,
+        lead_count: stats[b.id]?.total ?? 0,
+        new_count: stats[b.id]?.nuevos ?? 0,
+      })))
     } catch {
       setBoards([])
     } finally {
       setLoading(false)
     }
+  }
+
+  async function deleteBoard(id: string) {
+    // Las FK ON DELETE CASCADE borran columnas, leads y sus datos asociados.
+    const { error } = await supabase.from('boards').delete().eq('id', id)
+    if (error) throw error
+    setBoards(prev => prev.filter(b => b.id !== id))
   }
 
   // columns: lista de columnas a crear. Si no se pasa, usa las estándar.
@@ -63,7 +90,7 @@ export function useBoards() {
     return data
   }
 
-  return { boards, loading, refetch: loadBoards, createBoard }
+  return { boards, loading, refetch: loadBoards, createBoard, deleteBoard }
 }
 
 export function useBoardColumns(boardId: string) {
