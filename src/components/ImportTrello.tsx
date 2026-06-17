@@ -11,6 +11,7 @@ interface TrelloLabel { id: string; name: string; color: string }
 interface TrelloList { id: string; name: string; closed: boolean; pos: number }
 interface TrelloCard {
   id: string; name: string; desc: string; idList: string
+  pos?: number               // orden vertical de la tarjeta dentro de su lista
   due: string | null; closed: boolean; labels?: TrelloLabel[]
 }
 interface TrelloCheckItem { name: string; state: string }
@@ -184,6 +185,13 @@ export function ImportTrello({
 
     // 2) Tarjetas → leads (+ checklists → comentarios)
     const cards = parsed.cards.filter(c => colMap[c.idList])
+    // Orden EXACTO de Trello: dentro de cada lista, ordenar por pos y numerar 0,1,2…
+    const posByCard: Record<string, number> = {}
+    const byList: Record<string, TrelloCard[]> = {}
+    for (const c of cards) (byList[c.idList] ??= []).push(c)
+    for (const lst of Object.keys(byList)) {
+      byList[lst].sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0)).forEach((c, idx) => { posByCard[c.id] = idx })
+    }
     setProgress({ phase: 'leads', done: 0, total: cards.length })
     let leadsCreated = 0
     let commentsCreated = 0
@@ -203,6 +211,7 @@ export function ImportTrello({
         notes: buildNotes(card),
         source: 'form',
         is_read: true,
+        position: posByCard[card.id] ?? i,
         ...(meta.createdAt ? { created_at: meta.createdAt } : {}),
       }).select('id').single()
 

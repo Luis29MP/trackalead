@@ -99,6 +99,7 @@ export interface Lead {
   ai_summary: string | null
   assigned_to: string | null
   is_read: boolean            // false = badge "NUEVO"
+  position: number | null     // orden manual dentro de la columna (p. ej. orden de Trello)
   public_token: string | null // token para enlace público compartible
   budget_amount: number | null
   commission_amount: number | null

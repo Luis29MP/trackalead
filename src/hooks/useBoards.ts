@@ -139,6 +139,8 @@ export function useBoardColumns(boardId: string) {
         .select('*, assigned_professional:professionals(*)')
         .eq('board_id', boardId)
         .eq('is_archived', false)
+        // orden manual (Trello) primero; los que no lo tienen, por fecha
+        .order('position', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: false })
 
       setColumns(
