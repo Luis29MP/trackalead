@@ -13,7 +13,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import {
   Plus, ArrowLeft, Wrench, MapPin, ChevronLeft, ChevronRight,
-  ClipboardPaste, Calendar, Settings2, Trash2, ArrowUp, ArrowDown, Save,
+  ClipboardPaste, Calendar, Settings2, Trash2, ArrowUp, ArrowDown, Save, Download,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBoardColumns } from '@/hooks/useBoards'
@@ -27,6 +27,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { formatCurrency, formatRelativeTime, sourceLabel } from '@/lib/utils'
+import { ImportTrello } from '@/components/ImportTrello'
 import type { Board, Lead, BoardColumn } from '@/types'
 
 // ── Smart paste ───────────────────────────────────────────────────────────────────
@@ -372,6 +373,7 @@ export function KanbanBoard() {
   const [geoStatus, setGeoStatus] = useState<'idle' | 'loading' | 'ok' | 'fail'>('idle')
   const [latLng, setLatLng] = useState<{ lat: number; lng: number } | null>(null)
   const [manageOpen, setManageOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
 
@@ -579,6 +581,9 @@ export function KanbanBoard() {
           </p>
         </div>
 
+        <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => setImportOpen(true)}>
+          <Download className="h-4 w-4" /> Importar de Trello
+        </Button>
         <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => setManageOpen(true)}>
           <Settings2 className="h-4 w-4" /> Gestionar listas
         </Button>
@@ -645,6 +650,15 @@ export function KanbanBoard() {
         boardId={boardId!}
         columns={columns}
         onSaved={refetch}
+      />
+
+      {/* Dialog importar de Trello */}
+      <ImportTrello
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        boardId={boardId!}
+        existingColumnsCount={columns.length}
+        onImported={refetch}
       />
 
       {/* Dialog nuevo lead */}
