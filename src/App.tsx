@@ -13,6 +13,7 @@ import { MapPage } from '@/pages/MapPage'
 import { Calendar } from '@/pages/Calendar'
 import { Finances } from '@/pages/Finances'
 import { Budgets } from '@/pages/Budgets'
+import { Conversations } from '@/pages/Conversations'
 import { Professionals } from '@/pages/Professionals'
 import { Team } from '@/pages/Team'
 import { Notifications } from '@/pages/Notifications'
@@ -137,6 +138,7 @@ function AppRoutes() {
         <Route path="/calendar"      element={<Calendar />} />
         <Route path="/finances"      element={<Finances />} />
         <Route path="/budgets"       element={<Budgets />} />
+        <Route path="/conversations" element={<Conversations />} />
         <Route path="/professionals" element={<Professionals />} />
         <Route path="/team"          element={<Team />} />
         <Route path="/notifications" element={<Notifications />} />

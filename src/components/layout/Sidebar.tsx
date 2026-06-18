@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, LayoutGrid, Map, Calendar, DollarSign,
   HardHat, Users, Bell, Settings, LogOut, Radar,
-  ChevronDown, Check, Building2, Shield, Star, FileText,
+  ChevronDown, Check, Building2, Shield, Star, FileText, MessageCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
@@ -117,9 +117,18 @@ function OrgSwitcher() {
 }
 
 export function Sidebar({ width = 240 }: { width?: number }) {
-  const { profile, signOut, systemRole } = useAuth()
+  const { profile, signOut, systemRole, organization } = useAuth()
   const navigate = useNavigate()
   const isLifetime = profile?.plan_status === 'lifetime'
+
+  // "Conversaciones" solo si la org tiene WhatsApp configurado
+  const [hasWhatsApp, setHasWhatsApp] = useState(false)
+  useEffect(() => {
+    if (!organization?.id) { setHasWhatsApp(false); return }
+    supabase.from('org_integrations').select('id')
+      .eq('org_id', organization.id).in('provider', ['meta_whatsapp', 'evolution_api']).limit(1)
+      .then(({ data }) => setHasWhatsApp(!!data?.length))
+  }, [organization?.id])
 
   async function handleSignOut() {
     await signOut()
@@ -160,6 +169,23 @@ export function Sidebar({ width = 240 }: { width?: number }) {
               </NavLink>
             </li>
           ))}
+          {/* Conversaciones — solo si la org tiene WhatsApp configurado */}
+          {hasWhatsApp && (
+            <li>
+              <NavLink
+                to="/conversations"
+                className={({ isActive }) =>
+                  cn(
+                    'flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors',
+                    isActive ? 'bg-primary-600 text-white' : 'text-slate-400 hover:bg-white/8 hover:text-white'
+                  )
+                }
+              >
+                <MessageCircle className="h-4 w-4 shrink-0" />
+                Conversaciones
+              </NavLink>
+            </li>
+          )}
           {/* Enlace Super Admin — solo visible para super_admin */}
           {systemRole === 'super_admin' && (
             <li>

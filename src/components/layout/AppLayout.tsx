@@ -8,7 +8,7 @@ import { useAuth } from '@/context/AuthContext'
 import { Eye } from 'lucide-react'
 
 const SIDEBAR_W = 240
-const FULL_HEIGHT = /^\/boards\/.+|^\/map$/
+const FULL_HEIGHT = /^\/boards\/.+|^\/map$|^\/conversations$/
 
 export function AppLayout() {
   const { pathname } = useLocation()
