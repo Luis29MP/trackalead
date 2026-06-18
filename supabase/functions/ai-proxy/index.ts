@@ -93,12 +93,14 @@ async function callOpenAI(key: string, model: string, prompt: string, system: st
 
 async function callGemini(key: string, model: string, prompt: string, system: string | undefined, maxTokens: number, webSearch: boolean, images: ImagePart[]): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
+  // gemini-2.5-pro OBLIGA a usar "thinking" (thinkingBudget 0 da error 400).
+  // flash / flash-lite sí permiten desactivarlo (0) para que no trunque el JSON.
+  const thinkingOnly = /pro/i.test(model)
   const generationConfig: Record<string, unknown> = {
-    maxOutputTokens: Math.max(maxTokens, 4000),
+    maxOutputTokens: Math.max(maxTokens, thinkingOnly ? 8000 : 4000),
     temperature: 0.4,
-    // Desactivar el "thinking" de los modelos 2.5: si no, consume el presupuesto
-    // de tokens y la respuesta JSON sale truncada.
-    thinkingConfig: { thinkingBudget: 0 },
+    // pro → presupuesto dinámico (-1); flash → desactivado (0)
+    thinkingConfig: { thinkingBudget: thinkingOnly ? -1 : 0 },
   }
   const parts: unknown[] = [{ text: prompt }]
   for (const img of images) parts.push({ inlineData: { mimeType: img.mime, data: img.data } })
@@ -123,8 +125,8 @@ async function callGemini(key: string, model: string, prompt: string, system: st
   if (!res.ok) throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 160)}`)
   const data = await res.json()
   // Unir TODAS las partes de texto del candidato (grounding puede devolver varias)
-  const parts = data?.candidates?.[0]?.content?.parts ?? []
-  const text = parts.map((p: { text?: string }) => p.text ?? '').join('').trim()
+  const outParts = data?.candidates?.[0]?.content?.parts ?? []
+  const text = outParts.map((p: { text?: string }) => p.text ?? '').join('').trim()
   if (!text) throw new Error('gemini: respuesta vacía o sin texto (posible límite de tokens)')
   return text
 }
