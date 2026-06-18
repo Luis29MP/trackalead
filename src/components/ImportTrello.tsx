@@ -1,5 +1,5 @@
 import { useState, type ElementType } from 'react'
-import { Upload, FileJson, CheckCircle2, AlertCircle, Loader2, Columns3, CreditCard, ListChecks } from 'lucide-react'
+import { Upload, FileJson, CheckCircle2, AlertCircle, Loader2, Columns3, CreditCard, ListChecks, MessageSquare } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -9,26 +9,33 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 // ── Estructura del export JSON de Trello (solo lo que usamos) ───────────────────
 interface TrelloLabel { id: string; name: string; color: string }
 interface TrelloList { id: string; name: string; closed: boolean; pos: number }
+interface TrelloAttachment { name?: string; url?: string; isUpload?: boolean }
 interface TrelloCard {
   id: string; name: string; desc: string; idList: string
   pos?: number               // orden vertical de la tarjeta dentro de su lista
   due: string | null; closed: boolean; labels?: TrelloLabel[]
+  attachments?: TrelloAttachment[]
 }
 interface TrelloCheckItem { name: string; state: string }
 interface TrelloChecklist { id: string; idCard: string; name: string; checkItems: TrelloCheckItem[] }
+interface TrelloAction { type: string; date?: string; data?: { text?: string; card?: { id?: string } } }
 interface TrelloExport {
   name?: string
   lists?: TrelloList[]
   cards?: TrelloCard[]
   checklists?: TrelloChecklist[]
+  actions?: TrelloAction[]
 }
 
+interface TrelloComment { text: string; date: string | null }
 interface Parsed {
   boardName: string
   lists: TrelloList[]            // ordenadas, sin archivadas
   cards: TrelloCard[]           // sin archivadas y con lista válida
   checklistsByCard: Record<string, TrelloChecklist[]>
   checklistTotal: number
+  commentsByCard: Record<string, TrelloComment[]>   // de las acciones commentCard
+  commentTotal: number
 }
 
 const COLUMN_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#64748b']
@@ -48,7 +55,36 @@ function parseTrello(raw: unknown): Parsed {
     ;(checklistsByCard[cl.idCard] ??= []).push(cl)
     checklistTotal++
   }
-  return { boardName: data.name ?? 'Tablero de Trello', lists, cards, checklistsByCard, checklistTotal }
+
+  // Comentarios: acciones type=commentCard, agrupadas por tarjeta y ordenadas por fecha
+  const commentsByCard: Record<string, TrelloComment[]> = {}
+  let commentTotal = 0
+  for (const a of data.actions ?? []) {
+    if (a.type !== 'commentCard') continue
+    const cardId = a.data?.card?.id
+    const text = a.data?.text
+    if (!cardId || !text) continue
+    ;(commentsByCard[cardId] ??= []).push({ text, date: a.date ?? null })
+    commentTotal++
+  }
+  for (const id of Object.keys(commentsByCard)) {
+    commentsByCard[id].sort((x, y) => (x.date ?? '').localeCompare(y.date ?? ''))
+  }
+
+  return { boardName: data.name ?? 'Tablero de Trello', lists, cards, checklistsByCard, checklistTotal, commentsByCard, commentTotal }
+}
+
+// Filas de comentario a crear para una tarjeta: comentarios de Trello + adjuntos externos.
+// Adjuntos: solo URLs externas (no subidas a Trello, que requieren auth).
+function cardCommentRows(card: TrelloCard, commentsByCard: Record<string, TrelloComment[]>): { content: string; created_at: string | null }[] {
+  const rows: { content: string; created_at: string | null }[] = []
+  for (const c of commentsByCard[card.id] ?? []) rows.push({ content: c.text, created_at: c.date })
+  for (const att of card.attachments ?? []) {
+    if (att.isUpload) continue
+    if (!att.url || /trello\.com/i.test(att.url)) continue
+    rows.push({ content: `Archivo adjunto: ${att.name || att.url} - ${att.url}`, created_at: null })
+  }
+  return rows
 }
 
 // Extrae el valor de un campo etiquetado de la descripción (p. ej. "Teléfono: ...")
@@ -219,9 +255,18 @@ export function ImportTrello({
         errors++
       } else {
         leadsCreated++
+        // Checklists → comentarios
         for (const cl of parsed.checklistsByCard[card.id] ?? []) {
           const { error: cErr } = await supabase.from('lead_comments').insert({
             lead_id: lead.id, user_id: user.id, content: formatChecklist(cl),
+          })
+          if (cErr) errors++; else commentsCreated++
+        }
+        // Comentarios de Trello + adjuntos externos (con su fecha original)
+        for (const r of cardCommentRows(card, parsed.commentsByCard)) {
+          const { error: cErr } = await supabase.from('lead_comments').insert({
+            lead_id: lead.id, user_id: user.id, content: r.content,
+            ...(r.created_at ? { created_at: r.created_at } : {}),
           })
           if (cErr) errors++; else commentsCreated++
         }
@@ -236,10 +281,10 @@ export function ImportTrello({
     toast.success('Importación de Trello completada')
   }
 
-  // Reordena los leads YA importados según el orden exacto de Trello (pos ascendente),
-  // cruzándolos por teléfono. No crea ni borra nada: solo actualiza `position`.
+  // Para los leads YA importados (cruce por teléfono): reordena según Trello y
+  // añade los comentarios/adjuntos que falten. No crea leads ni duplica comentarios.
   async function reorderExisting() {
-    if (!parsed || !organization) return
+    if (!parsed || !organization || !user) return
     setImporting(true)
     setResult(null)
 
@@ -255,29 +300,56 @@ export function ImportTrello({
     const byList: Record<string, TrelloCard[]> = {}
     for (const c of parsed.cards) (byList[c.idList] ??= []).push(c)
     const updates: { id: string; pos: number }[] = []
+    const matched: { leadId: string; card: TrelloCard }[] = []
     let notFound = 0
     for (const lst of Object.keys(byList)) {
       byList[lst].sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0)).forEach((card, idx) => {
         const d = (parseCardMeta(card).phone ?? '').replace(/\D/g, '')
         const leadId = d.length >= 9 ? byPhone[d.slice(-9)] : undefined
-        if (leadId) updates.push({ id: leadId, pos: idx })
+        if (leadId) { updates.push({ id: leadId, pos: idx }); matched.push({ leadId, card }) }
         else notFound++
       })
     }
 
-    setProgress({ phase: 'leads', done: 0, total: updates.length })
-    let done = 0
-    for (let i = 0; i < updates.length; i++) {
-      const { error } = await supabase.from('leads').update({ position: updates[i].pos }).eq('id', updates[i].id)
-      if (!error) done++
-      setProgress({ phase: 'leads', done: i + 1, total: updates.length })
+    // Comentarios a crear, sin duplicar los que ya existan en ese lead
+    const matchedIds = [...new Set(matched.map(m => m.leadId))]
+    const existing = new Set<string>()
+    if (matchedIds.length) {
+      const { data: ex } = await supabase.from('lead_comments').select('lead_id, content').in('lead_id', matchedIds)
+      for (const e of ex ?? []) existing.add(`${e.lead_id}::${e.content}`)
+    }
+    const commentTasks: { lead_id: string; content: string; created_at: string | null }[] = []
+    for (const { leadId, card } of matched) {
+      for (const r of cardCommentRows(card, parsed.commentsByCard)) {
+        const key = `${leadId}::${r.content}`
+        if (existing.has(key)) continue
+        existing.add(key)
+        commentTasks.push({ lead_id: leadId, content: r.content, created_at: r.created_at })
+      }
+    }
+
+    const total = updates.length + commentTasks.length
+    setProgress({ phase: 'leads', done: 0, total })
+    let done = 0, posDone = 0, commentsDone = 0
+    for (const u of updates) {
+      const { error } = await supabase.from('leads').update({ position: u.pos }).eq('id', u.id)
+      if (!error) posDone++
+      setProgress({ phase: 'leads', done: ++done, total })
+    }
+    for (const t of commentTasks) {
+      const { error } = await supabase.from('lead_comments').insert({
+        lead_id: t.lead_id, user_id: user.id, content: t.content,
+        ...(t.created_at ? { created_at: t.created_at } : {}),
+      })
+      if (!error) commentsDone++
+      setProgress({ phase: 'leads', done: ++done, total })
     }
 
     setImporting(false)
     setProgress(null)
-    setResult({ columns: 0, leads: done, comments: 0, errors: notFound })
+    setResult({ columns: 0, leads: posDone, comments: commentsDone, errors: notFound })
     await onImported()
-    toast.success(`${done} leads reordenados según Trello${notFound ? ` · ${notFound} sin coincidencia` : ''}`)
+    toast.success(`${posDone} reordenados · ${commentsDone} comentarios nuevos${notFound ? ` · ${notFound} sin coincidencia` : ''}`)
   }
 
   const pct = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0
@@ -327,15 +399,17 @@ export function ImportTrello({
           /* Preview */
           <div className="space-y-4">
             <p className="text-xs text-gray-500 truncate">Archivo: <span className="font-medium text-gray-700">{fileName}</span></p>
-            <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="grid grid-cols-4 gap-2 text-center">
               <ResultStat icon={Columns3} value={parsed.lists.length} label="Listas" />
               <ResultStat icon={CreditCard} value={parsed.cards.length} label="Tarjetas" />
               <ResultStat icon={ListChecks} value={parsed.checklistTotal} label="Checklists" />
+              <ResultStat icon={MessageSquare} value={parsed.commentTotal} label="Comentarios" />
             </div>
             <p className="text-xs text-gray-500 bg-slate-50 rounded-lg p-3 leading-relaxed">
-              Se crearán <strong>{parsed.lists.length}</strong> columnas nuevas en este tablero y se añadirán{' '}
-              <strong>{parsed.cards.length}</strong> leads. Las descripciones, etiquetas y vencimientos van en las notas;
-              los checklists se añaden como comentarios. <span className="text-gray-400">No se modifica nada de lo ya existente.</span>
+              Se crearán <strong>{parsed.lists.length}</strong> columnas nuevas y <strong>{parsed.cards.length}</strong> leads.
+              Descripción, etiquetas y vencimiento van en las notas; los <strong>comentarios</strong> de Trello (con su fecha),
+              los checklists y los adjuntos externos se añaden como comentarios del lead.
+              <span className="text-gray-400"> No se modifica nada de lo ya existente.</span>
             </p>
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={reset}>Otro archivo</Button>
@@ -345,10 +419,10 @@ export function ImportTrello({
             </div>
             <div className="border-t border-gray-100 pt-3">
               <Button variant="outline" className="w-full gap-1.5 text-xs" onClick={reorderExisting}>
-                <ListChecks className="h-3.5 w-3.5" />Solo reordenar leads existentes (por teléfono)
+                <MessageSquare className="h-3.5 w-3.5" />Reordenar + importar comentarios (leads existentes)
               </Button>
               <p className="text-[11px] text-gray-400 mt-1 text-center">
-                Si ya los importaste antes: ordena los leads de este tablero con el orden exacto de Trello, sin crear duplicados.
+                Si ya los importaste antes: cruza por teléfono, aplica el orden exacto de Trello y añade los comentarios/adjuntos que falten. Sin duplicar.
               </p>
             </div>
           </div>
