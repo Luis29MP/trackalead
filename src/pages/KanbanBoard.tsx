@@ -207,6 +207,25 @@ interface NewLeadForm {
 }
 const EMPTY: NewLeadForm = { name: '', company: '', concept: '', zone: '', phone: '', email: '', source: 'form', notes: '' }
 
+// "Trabajo a realizar" con el formato estándar a partir del análisis de la IA
+function formatLeadSummary(a: import('@/lib/ai').LeadAnalysis): string {
+  const t = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  const fecha = `${p(t.getDate())}/${p(t.getMonth() + 1)}/${String(t.getFullYear()).slice(-2)}`
+  return [
+    `🔖 Referencia: ${a.phone}`,
+    `FECHA: ${fecha}`,
+    `🧑‍💼 Nombre del cliente: ${a.name}`,
+    `📞 Teléfono: ${a.phone}`,
+    `📍 Zona: ${a.zone}`,
+    `🛠 Tipo de trabajo: ${a.work_type || a.concept}`,
+    `📐 Medidas: ${a.measures || 'Pendiente de facilitar'}`,
+    `📝 Descripción rápida: ${a.description}`,
+    `📸 Fotos: ${a.photos ? 'Sí' : 'No'}`,
+    `📌 Nota: ${a.note}`,
+  ].join('\n')
+}
+
 // ── Gestionar listas ────────────────────────────────────────────────────────────────
 const COLUMN_PALETTE = ['#6B7280', '#3B82F6', '#8B5CF6', '#F59E0B', '#10B981', '#EF4444', '#059669', '#0EA5E9', '#EC4899', '#84CC16']
 
@@ -370,7 +389,7 @@ export function KanbanBoard() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<NewLeadForm>(EMPTY)
   const [pasteText, setPasteText] = useState('')
-  const [summarizing, setSummarizing] = useState(false)
+  const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'done'>('idle')
   const [geoStatus, setGeoStatus] = useState<'idle' | 'loading' | 'ok' | 'fail'>('idle')
   const [latLng, setLatLng] = useState<{ lat: number; lng: number } | null>(null)
   const [manageOpen, setManageOpen] = useState(false)
@@ -434,6 +453,7 @@ export function KanbanBoard() {
     setPasteText('')
     setGeoStatus('idle')
     setLatLng(null)
+    setAiStatus('idle')
     setDialog(true)
   }
 
@@ -478,19 +498,28 @@ export function KanbanBoard() {
   }
 
   async function handleAISummary() {
-    const rawText = form.notes || pasteText
+    const rawText = pasteText.trim() ? pasteText : form.notes
     if (!rawText.trim()) { toast.error('Pega o escribe el mensaje del cliente primero'); return }
-    setSummarizing(true)
+    setAiStatus('loading')
     try {
-      const { summarizeLeadText } = await import('@/lib/ai')
-      const summary = await summarizeLeadText({ text: rawText, concept: form.concept, zone: form.zone })
-      setForm(f => ({ ...f, notes: summary }))
-      toast.success('Resumen generado')
+      const { analyzeLeadMessage } = await import('@/lib/ai')
+      const a = await analyzeLeadMessage(rawText)
+      // Rellenar campos (sin pisar lo ya escrito si la IA devuelve vacío)
+      setForm(f => ({
+        ...f,
+        name:    a.name    || f.name,
+        phone:   a.phone   || f.phone,
+        email:   a.email   || f.email,
+        zone:    a.zone    || f.zone,
+        concept: a.concept || f.concept,
+        notes:   formatLeadSummary(a),
+      }))
+      setAiStatus('done')
+      toast.success('Campos rellenados con IA')
     } catch (err) {
-      toast.error('Error al generar resumen')
+      setAiStatus('idle')
+      toast.error(err instanceof Error ? err.message : 'Error al analizar el mensaje')
       console.error(err)
-    } finally {
-      setSummarizing(false)
     }
   }
 
@@ -698,8 +727,8 @@ export function KanbanBoard() {
                 <Button size="sm" variant="outline" onClick={handleSmartPaste} disabled={!pasteText.trim()} className="flex-1">
                   Extraer campos
                 </Button>
-                <Button size="sm" variant="outline" onClick={handleAISummary} disabled={summarizing} className="flex-1">
-                  {summarizing ? 'Resumiendo…' : '✨ Resumir con IA'}
+                <Button size="sm" variant="outline" onClick={handleAISummary} disabled={aiStatus === 'loading'} className="flex-1">
+                  {aiStatus === 'loading' ? 'Analizando…' : aiStatus === 'done' ? '✅ Campos rellenados' : '✨ Resumir con IA'}
                 </Button>
               </div>
             </div>

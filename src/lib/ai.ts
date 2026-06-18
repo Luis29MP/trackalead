@@ -260,3 +260,77 @@ function buildLocalSummary(text: string, concept?: string, zone?: string): strin
 
   return parts.join('. ').replace(/\.\s*\./g, '.').trim()
 }
+
+// ── Análisis inteligente del mensaje del cliente → campos del formulario ─────────
+export interface LeadAnalysis {
+  name: string        // solo el nombre de pila
+  phone: string
+  email: string
+  zone: string
+  concept: string     // resumen corto del trabajo
+  work_type: string   // tipo de trabajo con terminología del gremio
+  measures: string    // medidas o ''
+  description: string // 2-3 frases, no literal
+  photos: boolean
+  note: string        // oportunidad adicional o ''
+}
+
+const LEAD_ANALYSIS_SYSTEM = `Eres un asistente de un CRM de servicios del hogar en España (reformas, pintura, electricidad, carpintería, etc.).
+Analiza el mensaje del cliente y extrae la información de forma inteligente.
+NO copies el texto literal. Interpreta, resume y detecta oportunidades.
+Para el tipo de trabajo usa terminología profesional del gremio.
+Para la descripción rápida sé conciso y profesional.
+Si detectas una oportunidad futura o trabajo adicional, indícalo en Nota.
+
+Devuelve EXCLUSIVAMENTE un objeto JSON válido (sin texto adicional ni markdown) con esta forma exacta:
+{
+  "name": "solo el nombre de pila, sin apellidos si no son imprescindibles",
+  "phone": "teléfono o cadena vacía",
+  "email": "email o cadena vacía",
+  "zone": "ciudad o zona o cadena vacía",
+  "concept": "resumen corto del trabajo, ej: 'Puerta corredera blanca con cristal'",
+  "work_type": "tipo de trabajo con terminología profesional del gremio",
+  "measures": "medidas si las menciona; si no, cadena vacía",
+  "description": "resumen inteligente en 2-3 frases, NUNCA literal",
+  "photos": true o false según si el cliente menciona o adjunta fotos,
+  "note": "oportunidad adicional o trabajo futuro detectado; si no hay, cadena vacía"
+}`
+
+export async function analyzeLeadMessage(text: string): Promise<LeadAnalysis> {
+  const { supabase } = await import('./supabase')
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('No hay usuario para la IA')
+
+  const { data, error } = await supabase.functions.invoke('ai-proxy', {
+    body: { user_id: user.id, prompt: `Mensaje del cliente:\n\n${text}`, system: LEAD_ANALYSIS_SYSTEM, max_tokens: 1500, web_search: false, images: [] },
+  })
+  if (error) {
+    let detail = error.message
+    try {
+      const ctx = (error as { context?: Response }).context
+      if (ctx && typeof ctx.json === 'function') {
+        const b = await ctx.json()
+        if (Array.isArray(b?.details) && b.details.length) detail = b.details.join(' | ')
+        else if (b?.error) detail = b.error
+      }
+    } catch { /* sin cuerpo */ }
+    throw new Error(`Error de la IA: ${detail}`)
+  }
+  if (data?.error) throw new Error(data.error)
+
+  const obj = extractJson(data?.text ?? '') as Record<string, unknown> | null
+  if (!obj || typeof obj !== 'object') throw new Error('La IA no devolvió un JSON válido')
+  const photosRaw = obj.photos
+  return {
+    name: String(obj.name ?? '').trim(),
+    phone: String(obj.phone ?? '').trim(),
+    email: String(obj.email ?? '').trim(),
+    zone: String(obj.zone ?? '').trim(),
+    concept: String(obj.concept ?? '').trim(),
+    work_type: String(obj.work_type ?? '').trim(),
+    measures: String(obj.measures ?? '').trim(),
+    description: String(obj.description ?? '').trim(),
+    photos: photosRaw === true || /^(s[ií]|true|yes)$/i.test(String(photosRaw ?? '').trim()),
+    note: String(obj.note ?? '').trim(),
+  }
+}
