@@ -236,6 +236,50 @@ export function ImportTrello({
     toast.success('Importación de Trello completada')
   }
 
+  // Reordena los leads YA importados según el orden exacto de Trello (pos ascendente),
+  // cruzándolos por teléfono. No crea ni borra nada: solo actualiza `position`.
+  async function reorderExisting() {
+    if (!parsed || !organization) return
+    setImporting(true)
+    setResult(null)
+
+    const { data: leads } = await supabase.from('leads')
+      .select('id, phone').eq('board_id', boardId).eq('is_archived', false)
+    const byPhone: Record<string, string> = {}
+    for (const l of leads ?? []) {
+      const d = (l.phone ?? '').replace(/\D/g, '')
+      if (d.length >= 9) byPhone[d.slice(-9)] = l.id   // últimos 9 dígitos como clave
+    }
+
+    // Dentro de cada lista, orden por pos ascendente → posición 0,1,2…
+    const byList: Record<string, TrelloCard[]> = {}
+    for (const c of parsed.cards) (byList[c.idList] ??= []).push(c)
+    const updates: { id: string; pos: number }[] = []
+    let notFound = 0
+    for (const lst of Object.keys(byList)) {
+      byList[lst].sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0)).forEach((card, idx) => {
+        const d = (parseCardMeta(card).phone ?? '').replace(/\D/g, '')
+        const leadId = d.length >= 9 ? byPhone[d.slice(-9)] : undefined
+        if (leadId) updates.push({ id: leadId, pos: idx })
+        else notFound++
+      })
+    }
+
+    setProgress({ phase: 'leads', done: 0, total: updates.length })
+    let done = 0
+    for (let i = 0; i < updates.length; i++) {
+      const { error } = await supabase.from('leads').update({ position: updates[i].pos }).eq('id', updates[i].id)
+      if (!error) done++
+      setProgress({ phase: 'leads', done: i + 1, total: updates.length })
+    }
+
+    setImporting(false)
+    setProgress(null)
+    setResult({ columns: 0, leads: done, comments: 0, errors: notFound })
+    await onImported()
+    toast.success(`${done} leads reordenados según Trello${notFound ? ` · ${notFound} sin coincidencia` : ''}`)
+  }
+
   const pct = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0
 
   return (
@@ -298,6 +342,14 @@ export function ImportTrello({
               <Button className="flex-1 gap-1.5" onClick={handleImport}>
                 <Upload className="h-4 w-4" />Importar
               </Button>
+            </div>
+            <div className="border-t border-gray-100 pt-3">
+              <Button variant="outline" className="w-full gap-1.5 text-xs" onClick={reorderExisting}>
+                <ListChecks className="h-3.5 w-3.5" />Solo reordenar leads existentes (por teléfono)
+              </Button>
+              <p className="text-[11px] text-gray-400 mt-1 text-center">
+                Si ya los importaste antes: ordena los leads de este tablero con el orden exacto de Trello, sin crear duplicados.
+              </p>
             </div>
           </div>
         ) : (
