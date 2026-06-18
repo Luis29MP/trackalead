@@ -527,6 +527,12 @@ export function KanbanBoard() {
     if (!form.name.trim() || !targetColumnId || !boardId) return
     setSaving(true)
     try {
+      // El nuevo lead va ARRIBA de su columna: posición = (mínima actual) - 1
+      const { data: topLead } = await supabase.from('leads')
+        .select('position').eq('column_id', targetColumnId).eq('is_archived', false)
+        .not('position', 'is', null).order('position', { ascending: true }).limit(1).maybeSingle()
+      const newPosition = topLead?.position != null ? topLead.position - 1 : 0
+
       const { data: newLead } = await supabase.from('leads').insert({
         board_id: boardId,
         org_id: organization!.id,
@@ -541,6 +547,7 @@ export function KanbanBoard() {
         source: form.source,
         notes: form.notes || null,
         is_read: false,
+        position: newPosition,
         lat: latLng?.lat ?? null,
         lng: latLng?.lng ?? null,
       }).select().single()
