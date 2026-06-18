@@ -28,6 +28,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { formatCurrency, formatRelativeTime, sourceLabel } from '@/lib/utils'
 import { ImportTrello } from '@/components/ImportTrello'
+import { DeleteBoardDialog } from '@/components/DeleteBoardDialog'
 import type { Board, Lead, BoardColumn } from '@/types'
 
 // ── Smart paste ───────────────────────────────────────────────────────────────────
@@ -374,6 +375,7 @@ export function KanbanBoard() {
   const [latLng, setLatLng] = useState<{ lat: number; lng: number } | null>(null)
   const [manageOpen, setManageOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
 
@@ -590,6 +592,9 @@ export function KanbanBoard() {
         <Button size="sm" className="gap-1.5 shrink-0 bg-primary-600 hover:bg-primary-700" onClick={handleNewLead}>
           <Plus className="h-4 w-4" /> Nuevo lead
         </Button>
+        <Button variant="ghost" size="icon" className="shrink-0 text-gray-400 hover:text-red-600 hover:bg-red-50" title="Eliminar tablero" onClick={() => setDeleteOpen(true)}>
+          <Trash2 className="h-4 w-4" />
+        </Button>
       </div>
 
       {/* ── Área Kanban: scroll horizontal, columnas con scroll vertical ─── */}
@@ -659,6 +664,15 @@ export function KanbanBoard() {
         boardId={boardId!}
         existingColumnsCount={columns.length}
         onImported={refetch}
+      />
+
+      {/* Dialog eliminar tablero */}
+      <DeleteBoardDialog
+        board={board ? { id: board.id, name: board.name } : null}
+        leadCount={allLeads.length}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        onDeleted={() => navigate('/boards')}
       />
 
       {/* Dialog nuevo lead */}

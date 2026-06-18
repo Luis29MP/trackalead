@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { formatDate } from '@/lib/utils'
+import { DeleteBoardDialog } from '@/components/DeleteBoardDialog'
 import type { Board } from '@/types'
 
 const BOARD_COLORS = [
@@ -25,7 +26,7 @@ interface BoardFormData {
 }
 
 export function Boards() {
-  const { boards, loading, createBoard, deleteBoard } = useBoards()
+  const { boards, loading, createBoard, refetch } = useBoards()
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [selectedColor, setSelectedColor] = useState(BOARD_COLORS[0])
@@ -68,18 +69,7 @@ export function Boards() {
     }
   }
 
-  async function handleDelete(board: Board) {
-    const n = board.lead_count ?? 0
-    if (!window.confirm(
-      `¿Eliminar el tablero "${board.name}"?\n\nSe borrarán también sus ${n} lead(s) y todas sus listas, comentarios y archivos. Esta acción es irreversible.`
-    )) return
-    try {
-      await deleteBoard(board.id)
-      toast.success(`Tablero "${board.name}" eliminado`)
-    } catch {
-      toast.error('No se pudo eliminar el tablero')
-    }
-  }
+  const [deleteTarget, setDeleteTarget] = useState<Board | null>(null)
 
   if (loading) {
     return (
@@ -214,11 +204,19 @@ export function Boards() {
               key={board.id}
               board={board}
               onClick={() => navigate(`/boards/${board.id}`)}
-              onDelete={() => handleDelete(board)}
+              onDelete={() => setDeleteTarget(board)}
             />
           ))}
         </div>
       )}
+
+      <DeleteBoardDialog
+        board={deleteTarget}
+        leadCount={deleteTarget?.lead_count}
+        open={!!deleteTarget}
+        onOpenChange={v => { if (!v) setDeleteTarget(null) }}
+        onDeleted={() => { setDeleteTarget(null); refetch() }}
+      />
     </div>
   )
 }
@@ -238,7 +236,7 @@ function BoardCard({ board, onClick, onDelete }: { board: Board; onClick: () => 
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={(e) => { e.stopPropagation(); onDelete() }}
-              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-gray-300 hover:text-red-600 hover:bg-red-50"
+              className="p-1 rounded text-gray-300 hover:text-red-600 hover:bg-red-50 transition-colors"
               title="Eliminar tablero"
             >
               <Trash2 className="h-4 w-4" />
