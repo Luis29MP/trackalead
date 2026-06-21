@@ -60,5 +60,5 @@ export async function sheetToText(file: File): Promise<string> {
     const csv = XLSX.utils.sheet_to_csv(wb.Sheets[name])
     out.push(`# ${name}\n${csv}`)
   }
-  return out.join('\n\n').slice(0, 20000)
+  return out.join('\n\n').slice(0, 80000)   // pliegos Excel pueden tener cientos de partidas
 }

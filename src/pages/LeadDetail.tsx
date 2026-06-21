@@ -368,19 +368,32 @@ export function LeadDetail() {
     try {
       const { data: files } = await supabase.from('lead_files').select('name, url, type').eq('lead_id', lead.id)
       if (files?.length) {
-        const { extractKnowledgeText } = await import('@/lib/extractText')
+        const { extractKnowledgeText, pdfToImages } = await import('@/lib/extractText')
         const docTexts: string[] = []
         for (const f of files) {
           try {
             const isImage = (f.type ?? '').startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(f.name)
+            const isPdf = (f.type ?? '').includes('pdf') || /\.pdf$/i.test(f.name)
             const blob = await (await fetch(f.url)).blob()
-            if (isImage && images.length < 6) {
-              const img = await blobToResizedImage(blob)
-              if (img) images.push(img)
-            } else if (!isImage) {
+            if (isImage) {
+              if (images.length < 10) {                       // máx. 10 imágenes
+                const img = await blobToResizedImage(blob)
+                if (img) images.push(img)
+              }
+            } else {
               const file = new File([blob], f.name, { type: f.type ?? blob.type })
               const txt = await extractKnowledgeText(file)
-              if (txt.trim()) docTexts.push(`# ${f.name}\n${txt.slice(0, 8000)}`)
+              if (txt.trim().length >= 100) {
+                docTexts.push(`# ${f.name}\n${txt.slice(0, 40000)}`)   // hasta 40.000 car/doc
+              } else if (isPdf) {
+                // PDF escaneado (sin capa de texto) → páginas a imagen para que las "vea" la IA
+                const pageImgs = await pdfToImages(file, 8)
+                for (const pi of pageImgs) {
+                  if (images.length < 10) images.push({ dataUrl: `data:${pi.mime};base64,${pi.data}`, mime: pi.mime, data: pi.data })
+                }
+              } else if (txt.trim()) {
+                docTexts.push(`# ${f.name}\n${txt.slice(0, 40000)}`)
+              }
             }
           } catch { /* archivo que falla → se omite */ }
         }
