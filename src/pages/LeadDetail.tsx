@@ -50,6 +50,29 @@ function toWhatsApp(phone: string): string {
   return d.startsWith('34') ? `https://wa.me/${d}` : `https://wa.me/34${d}`
 }
 
+// Redimensiona una imagen (blob) a máx. 1024px y la devuelve como JPEG base64 para la IA
+function blobToResizedImage(blob: Blob): Promise<{ dataUrl: string; mime: string; data: string } | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.onload = () => {
+      const max = 1024
+      const scale = Math.min(1, max / Math.max(img.width, img.height))
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { URL.revokeObjectURL(url); resolve(null); return }
+      ctx.drawImage(img, 0, 0, w, h)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7)
+      URL.revokeObjectURL(url)
+      resolve({ dataUrl, mime: 'image/jpeg', data: dataUrl.split(',')[1] })
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null) }
+    img.src = url
+  })
+}
+
 // ── Helpers de parsing de PDF ────────────────────────────────────────────────
 
 // Devuelve true si el string parece un teléfono español
@@ -219,6 +242,7 @@ export function LeadDetail() {
   const [professionals,setProfessionals] = useState<Professional[]>([])
   const [leadBudgets,  setLeadBudgets]   = useState<Budget[]>([])
   const [budgetWizard, setBudgetWizard]  = useState<Draft | null>(null)
+  const [preparingBudget, setPreparingBudget] = useState(false)
   const [columns,      setColumns]      = useState<BoardColumn[]>([])
   const [newComment,   setNewComment]   = useState('')
   const [uploading,    setUploading]    = useState(false)
@@ -333,9 +357,42 @@ export function LeadDetail() {
     exportBudgetPdf(b, budgetIssuer(b))
   }
 
-  // Abre el asistente de presupuesto con los datos del lead ya rellenados
-  function openBudgetWizard() {
+  // Abre el asistente de presupuesto con los datos del lead ya rellenados.
+  // Además lee los adjuntos del lead: extrae el texto de documentos (Excel,
+  // PDF, CSV…) y las imágenes (planos) para que la IA los use al presupuestar.
+  async function openBudgetWizard() {
     if (!lead) return
+    setPreparingBudget(true)
+    let workNotes = lead.notes ?? ''
+    const images: { dataUrl: string; mime: string; data: string }[] = []
+    try {
+      const { data: files } = await supabase.from('lead_files').select('name, url, type').eq('lead_id', lead.id)
+      if (files?.length) {
+        const { extractKnowledgeText } = await import('@/lib/extractText')
+        const docTexts: string[] = []
+        for (const f of files) {
+          try {
+            const isImage = (f.type ?? '').startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(f.name)
+            const blob = await (await fetch(f.url)).blob()
+            if (isImage && images.length < 6) {
+              const img = await blobToResizedImage(blob)
+              if (img) images.push(img)
+            } else if (!isImage) {
+              const file = new File([blob], f.name, { type: f.type ?? blob.type })
+              const txt = await extractKnowledgeText(file)
+              if (txt.trim()) docTexts.push(`# ${f.name}\n${txt.slice(0, 8000)}`)
+            }
+          } catch { /* archivo que falla → se omite */ }
+        }
+        if (docTexts.length) {
+          workNotes = `${workNotes}\n\n--- Documentos adjuntos (pliegos / planos / medidas) ---\n${docTexts.join('\n\n')}`.trim()
+        }
+        if (docTexts.length || images.length) {
+          toast.success(`La IA leerá ${docTexts.length} documento(s) y ${images.length} imagen(es) del lead`)
+        }
+      }
+    } catch { /* sin adjuntos o error de lectura → seguimos con lo que haya */ }
+    setPreparingBudget(false)
     setBudgetWizard({
       ...emptyDraft(),
       lead_id: lead.id,
@@ -343,7 +400,8 @@ export function LeadDetail() {
       client_phone: lead.phone ?? '',
       client_address: lead.address || lead.zone || '',
       concept: lead.concept ?? '',
-      work_notes: lead.notes ?? '',
+      work_notes: workNotes,
+      images,
     })
   }
   async function budgetWhatsApp(b: Budget) {
@@ -763,7 +821,7 @@ export function LeadDetail() {
         type="file"
         className="hidden"
         onChange={handleFileUpload}
-        accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+        accept=".pdf,.xlsx,.xls,.csv,.txt,.jpg,.jpeg,.png,.webp,.doc,.docx"
       />
       {/* Input específico para presupuesto PDF */}
       <input
@@ -906,15 +964,15 @@ export function LeadDetail() {
             <TabsContent value="budgets" className="mt-4">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-sm font-medium text-gray-700">Presupuestos del cliente</p>
-                <Button size="sm" onClick={openBudgetWizard} className="gap-1.5 text-xs">
-                  <Sparkles className="h-3.5 w-3.5" />Crear presupuesto
+                <Button size="sm" onClick={openBudgetWizard} disabled={preparingBudget} className="gap-1.5 text-xs">
+                  <Sparkles className="h-3.5 w-3.5" />{preparingBudget ? 'Leyendo adjuntos…' : 'Crear presupuesto'}
                 </Button>
               </div>
               {leadBudgets.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
                   <FileText className="h-8 w-8 mx-auto mb-2 opacity-30" />
                   <p className="text-sm">Sin presupuestos para este cliente</p>
-                  <button className="mt-2 text-xs text-primary-600" onClick={openBudgetWizard}>Crear el primer presupuesto →</button>
+                  <button className="mt-2 text-xs text-primary-600" onClick={openBudgetWizard} disabled={preparingBudget}>{preparingBudget ? 'Leyendo adjuntos…' : 'Crear el primer presupuesto →'}</button>
                 </div>
               ) : (
                 <div className="space-y-2">
