@@ -9,7 +9,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { generateBudget, generateBudgetSplit, splitBudgetOptions, type AiImage } from '@/lib/ai'
 import { fetchProKnowledgeText } from '@/lib/proKnowledge'
-import { exportBudgetPdf, type PdfOrgInfo } from '@/lib/budgetPdf'
+import { exportBudgetPdf, exportBudgetComparison, type PdfOrgInfo } from '@/lib/budgetPdf'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -282,6 +282,7 @@ export function Budgets() {
 
       {wizardOpen && editDraft && (
         <BudgetWizard
+          key={editDraft.id ?? 'new'}
           initial={editDraft}
           leads={leads}
           professionals={professionals}
@@ -290,6 +291,7 @@ export function Budgets() {
           orgName={organization?.name}
           onClose={() => setWizardOpen(false)}
           onSaved={() => { loadBudgets() }}
+          onEditBudget={(b) => openEdit(b)}
         />
       )}
 
@@ -325,7 +327,7 @@ export function Budgets() {
 }
 
 // ── Asistente de generación (4 pasos) ──────────────────────────────────────────
-export function BudgetWizard({ initial, leads, professionals, orgId, userId, orgName, onClose, onSaved }: {
+export function BudgetWizard({ initial, leads, professionals, orgId, userId, orgName, onClose, onSaved, onEditBudget }: {
   initial: Draft
   leads: Lead[]
   professionals: Professional[]
@@ -334,6 +336,7 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
   orgName?: string
   onClose: () => void
   onSaved: () => void
+  onEditBudget?: (b: Budget) => void   // "Ver/Editar" una opción desde el resumen
 }) {
   // Edición → paso 3; si ya trae un lead preseleccionado (desde la ficha) → paso 2; si no → paso 1
   const [step, setStep] = useState(initial.lines.length > 0 || initial.id ? 3 : initial.lead_id ? 2 : 1)
@@ -613,6 +616,25 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
     if (saved) onClose()
   }
 
+  // Acciones del resumen de opciones (ya guardadas en BD)
+  async function deleteOneResult(b: Budget) {
+    if (!splitResults) return
+    if (!window.confirm(`¿Borrar "${b.concept}"? Esta opción se eliminará.`)) return
+    await supabase.from('budgets').delete().eq('id', b.id)
+    const rest = splitResults.filter(x => x.id !== b.id)
+    setSplitResults(rest.length ? rest : null)
+    onSaved()
+    if (!rest.length) onClose()
+  }
+  async function deleteAllResults() {
+    if (!splitResults) return
+    if (!window.confirm('¿Borrar el grupo completo de opciones? Se eliminarán todas.')) return
+    await supabase.from('budgets').delete().in('id', splitResults.map(b => b.id))
+    setSplitResults(null)
+    onSaved()
+    onClose()
+  }
+
   const STEPS = ['Lead', 'Configurar', 'Revisar', 'Exportar']
 
   return (
@@ -622,31 +644,50 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
 
         {splitResults ? (
           /* ── Resumen multi-gremio ───────────────────────────────────────── */
+          (() => {
+            const isOptions = splitResults.every(b => !!b.group_id)
+            return (
           <div className="space-y-4">
             <div className="text-center py-2">
-              <div className="w-12 h-12 rounded-full bg-primary-50 flex items-center justify-center mx-auto mb-2">
-                <Layers className="h-6 w-6 text-primary-600" />
+              <div className="w-12 h-12 rounded-full bg-green-50 flex items-center justify-center mx-auto mb-2">
+                <Check className="h-6 w-6 text-green-600" />
               </div>
-              <p className="font-semibold text-gray-900">{splitResults.length} presupuesto(s) creado(s)</p>
-              <p className="text-sm text-gray-400">Uno por gremio. Puedes editar cada uno desde la lista.</p>
+              <p className="font-semibold text-gray-900">{splitResults.length} presupuesto(s) guardado(s)</p>
+              <p className="text-sm text-gray-400">{isOptions ? 'Opciones del mismo trabajo, ya guardadas. Edítalas, bórralas o expórtalas.' : 'Uno por gremio, ya guardados.'}</p>
             </div>
             <div className="space-y-2">
               {splitResults.map(b => (
-                <div key={b.id} className="flex items-center justify-between border border-gray-100 rounded-lg px-3 py-2.5">
-                  <div className="min-w-0">
+                <div key={b.id} className="flex items-center gap-2 border border-gray-100 rounded-lg px-3 py-2.5">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-gray-800 truncate">{b.concept}</p>
                     <p className="text-xs text-gray-400">{b.lines.length} líneas · {formatCurrency(b.total)}</p>
                   </div>
-                  <Button size="sm" variant="outline" className="gap-1.5 shrink-0" onClick={() => exportBudgetPdf(b, buildIssuer(b, professionals, orgName))}>
-                    <Download className="h-3.5 w-3.5" />PDF
-                  </Button>
+                  {onEditBudget && (
+                    <Button size="sm" variant="outline" className="gap-1 shrink-0 h-8 text-xs" onClick={() => onEditBudget(b)} title="Ver / Editar">
+                      <Pencil className="h-3.5 w-3.5" />Editar
+                    </Button>
+                  )}
+                  <button onClick={() => exportBudgetPdf(b, buildIssuer(b, professionals, orgName))} className="p-1.5 rounded hover:bg-blue-50 text-blue-500 shrink-0" title="Exportar PDF"><Download className="h-4 w-4" /></button>
+                  <button onClick={() => deleteOneResult(b)} className="p-1.5 rounded hover:bg-red-50 text-red-400 shrink-0" title="Borrar esta opción"><Trash2 className="h-4 w-4" /></button>
                 </div>
               ))}
             </div>
-            <div className="flex justify-end pt-1">
-              <Button onClick={onClose}>Cerrar</Button>
+            <div className="flex flex-wrap justify-between gap-2 pt-1">
+              <div className="flex gap-2">
+                {isOptions && (
+                  <Button variant="outline" className="gap-1.5" onClick={() => exportBudgetComparison(splitResults, buildIssuer(splitResults[0], professionals, orgName))}>
+                    <Layers className="h-4 w-4" />Exportar comparativa
+                  </Button>
+                )}
+                <Button variant="outline" className="gap-1.5 text-red-600 border-red-200" onClick={deleteAllResults}>
+                  <Trash2 className="h-4 w-4" />Borrar {isOptions ? 'grupo' : 'todos'}
+                </Button>
+              </div>
+              <Button onClick={onClose}>Hecho</Button>
             </div>
           </div>
+            )
+          })()
         ) : (
         <>
         {/* Indicador de pasos */}

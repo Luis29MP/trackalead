@@ -39,6 +39,67 @@ function toWhatsApp(phone: string) {
   return d.startsWith('34') ? `https://wa.me/${d}` : `https://wa.me/34${d}`
 }
 
+// Presupuestos del profesional (vía RPC pro_budgets)
+interface PanelBudget {
+  id: string; group_id: string | null; lead_id: string | null; concept: string | null
+  client_name: string | null; lines: BudgetLine[]; subtotal: number; vat_percent: number
+  vat_amount: number; total: number; status: string; validated_at: string | null
+  notes: string | null; created_at: string; lead_name: string | null
+}
+
+function groupProBudgets(budgets: PanelBudget[]): PanelBudget[][] {
+  const seen = new Set<string>(); const out: PanelBudget[][] = []
+  for (const b of budgets) {
+    if (b.group_id) { if (seen.has(b.group_id)) continue; seen.add(b.group_id); out.push(budgets.filter(x => x.group_id === b.group_id)) }
+    else out.push([b])
+  }
+  return out
+}
+function optLabel(b: PanelBudget, i: number): string {
+  const m = (b.concept || '').match(/(opci[oó]n|alternativa|variante)\s*[\wáéíó]+$/i)
+  return m ? m[0] : `Opción ${i + 1}`
+}
+
+// Tarjeta de presupuesto en el panel del profesional: ve las opciones y valida.
+function ProBudgetCard({ budgets, onValidate }: { budgets: PanelBudget[]; onValidate: (b: PanelBudget) => void }) {
+  const [active, setActive] = useState(0)
+  const b = budgets[active] ?? budgets[0]
+  const isGroup = budgets.length > 1
+  const base = (budgets[0].concept || 'Presupuesto').replace(/\s*[-–]\s*(opci[oó]n|alternativa|variante).*$/i, '').trim()
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 space-y-3">
+      <div>
+        <p className="font-semibold text-gray-900 truncate">{b.client_name || b.lead_name || 'Cliente'}</p>
+        <p className="text-sm text-primary-600 font-medium truncate">{base}</p>
+      </div>
+      {isGroup && (
+        <div className="flex gap-1 flex-wrap">
+          {budgets.map((opt, i) => (
+            <button key={opt.id} onClick={() => setActive(i)}
+              className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${i === active ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+              {optLabel(opt, i)} · {formatCurrency(opt.total)}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="border border-gray-100 rounded-lg divide-y divide-gray-50">
+        {(b.lines ?? []).map((l, i) => (
+          <div key={i} className="flex items-center justify-between px-3 py-1.5 text-xs gap-2">
+            <span className="text-gray-700 truncate">{l.concept}</span>
+            <span className="text-gray-500 shrink-0">{l.units} × {formatCurrency(l.unit_price)} = <strong className="text-gray-800">{formatCurrency(l.total)}</strong></span>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-bold text-gray-900">Total: {formatCurrency(b.total)}</span>
+        {b.validated_at
+          ? <span className="text-[12px] font-semibold text-green-600 flex items-center gap-1"><Check className="h-4 w-4" />Validado</span>
+          : <Button size="sm" className="gap-1.5 bg-green-600 hover:bg-green-700" onClick={() => onValidate(b)}><Check className="h-4 w-4" />Validar</Button>}
+      </div>
+    </div>
+  )
+}
+
 export function ProPanel() {
   const { token } = useParams<{ token: string }>()
   const [professional, setProfessional]  = useState<Professional | null>(null)
@@ -50,6 +111,7 @@ export function ProPanel() {
   const [uploading, setUploading]        = useState(false)
   const [notFound, setNotFound]          = useState(false)
   const [partidas, setPartidas]          = useState<PanelPartida[]>([])
+  const [budgets, setBudgets]            = useState<PanelBudget[]>([])
   const [selectedPartida, setSelectedPartida] = useState<PanelPartida | null>(null)
   const [partidaLines, setPartidaLines]  = useState<BudgetLine[]>([])
   const [savingPartida, setSavingPartida] = useState(false)
@@ -86,7 +148,16 @@ export function ProPanel() {
     setOwnerId(d.owner_id ?? null)
     setLeads(d.leads ?? [])
     setPartidas(d.partidas ?? [])
+    const { data: bg } = await supabase.rpc('pro_budgets', { p_token: token })
+    setBudgets((bg ?? []) as PanelBudget[])
     return true
+  }
+
+  async function validateBudget(b: PanelBudget) {
+    const { error } = await supabase.rpc('pro_budget_validate', { p_token: token, p_budget_id: b.id })
+    if (error) { toast.error('No se pudo validar'); return }
+    toast.success('Presupuesto validado — el gestor recibe el aviso')
+    reload()
   }
 
   // Texto de conocimiento del profesional (vía RPC, sin sesión)
@@ -525,6 +596,19 @@ export function ProPanel() {
                 </button>
               )
             })}
+          </div>
+        )}
+
+        {/* Presupuestos de los clientes (con opciones) — ver y validar */}
+        {budgets.length > 0 && (
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><FileText className="h-5 w-5 text-primary-600" />Presupuestos de tus clientes</h2>
+              <p className="text-sm text-gray-400">Revisa las opciones y valídalas. Al validar, el gestor recibe un aviso.</p>
+            </div>
+            {groupProBudgets(budgets).map(group => (
+              <ProBudgetCard key={group[0].group_id ?? group[0].id} budgets={group} onValidate={validateBudget} />
+            ))}
           </div>
         )}
 

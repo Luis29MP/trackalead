@@ -216,6 +216,8 @@ export interface Budget {
   notes: string | null
   status: BudgetStatus
   ai_generated: boolean
+  validated_at?: string | null   // validado por el profesional asignado
+  validated_by?: string | null   // professional_id que validó
   created_at: string
   updated_at: string
 }

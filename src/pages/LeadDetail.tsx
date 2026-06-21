@@ -78,6 +78,16 @@ type BudgetRowHandlers = {
   onWhatsApp: (b: Budget) => void
   onExport: (b: Budget) => void
   onOpen: (b: Budget) => void
+  onDelete: (b: Budget) => void
+}
+
+// Badge de estado: "Validado" (por el profesional) tiene prioridad sobre el estado
+function BudgetStatusBadge({ b }: { b: Budget }) {
+  if (b.validated_at) {
+    return <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 bg-green-100 text-green-700 flex items-center gap-0.5"><Check className="h-2.5 w-2.5" />Validado</span>
+  }
+  const st = BUDGET_STATUS[b.status] ?? BUDGET_STATUS.draft
+  return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${st.color}`}>{st.label}</span>
 }
 
 // Agrupa los presupuestos por group_id (conservando el orden); los sueltos van solos.
@@ -99,18 +109,18 @@ function optionTabLabel(b: Budget, i: number): string {
   return m ? m[0] : `Opción ${i + 1}`
 }
 
-function BudgetActions({ b, onWhatsApp, onExport, onOpen }: { b: Budget } & BudgetRowHandlers) {
+function BudgetActions({ b, onWhatsApp, onExport, onOpen, onDelete }: { b: Budget } & BudgetRowHandlers) {
   return (
     <div className="flex items-center gap-1 shrink-0">
       <button onClick={() => onWhatsApp(b)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-500" title="Enviar por WhatsApp"><MessageCircle className="h-3.5 w-3.5" /></button>
       <button onClick={() => onExport(b)} className="p-1.5 rounded hover:bg-blue-50 text-blue-500" title="Exportar PDF"><Download className="h-3.5 w-3.5" /></button>
+      <button onClick={() => onDelete(b)} className="p-1.5 rounded hover:bg-red-50 text-red-400" title="Borrar"><Trash2 className="h-3.5 w-3.5" /></button>
       <button onClick={() => onOpen(b)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400" title="Abrir en Presupuestos"><ChevronRight className="h-3.5 w-3.5" /></button>
     </div>
   )
 }
 
 function SingleBudgetRow({ b, ...h }: { b: Budget } & BudgetRowHandlers) {
-  const st = BUDGET_STATUS[b.status] ?? BUDGET_STATUS.draft
   return (
     <div className="flex items-center gap-3 border border-gray-100 rounded-lg px-3 py-2.5">
       <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0"><FileText className="h-4 w-4 text-primary-600" /></div>
@@ -119,7 +129,7 @@ function SingleBudgetRow({ b, ...h }: { b: Budget } & BudgetRowHandlers) {
         <p className="text-xs text-gray-400">{formatDate(b.created_at)} · {b.lines?.length ?? 0} líneas</p>
       </div>
       <span className="font-semibold text-gray-900 text-sm shrink-0">{formatCurrency(b.total)}</span>
-      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${st.color}`}>{st.label}</span>
+      <BudgetStatusBadge b={b} />
       <BudgetActions b={b} {...h} />
     </div>
   )
@@ -129,7 +139,6 @@ function SingleBudgetRow({ b, ...h }: { b: Budget } & BudgetRowHandlers) {
 function BudgetOptionsGroup({ budgets, onCompare, ...h }: { budgets: Budget[]; onCompare: () => void } & BudgetRowHandlers) {
   const [active, setActive] = useState(0)
   const b = budgets[active] ?? budgets[0]
-  const st = BUDGET_STATUS[b.status] ?? BUDGET_STATUS.draft
   const base = (budgets[0].concept || 'Presupuesto').replace(/\s*[-–]\s*(opci[oó]n|alternativa|variante).*$/i, '').trim()
   return (
     <div className="border border-primary-200 rounded-lg overflow-hidden">
@@ -151,7 +160,7 @@ function BudgetOptionsGroup({ budgets, onCompare, ...h }: { budgets: Budget[]; o
           <p className="text-xs text-gray-400">{formatDate(b.created_at)} · {b.lines?.length ?? 0} líneas</p>
         </div>
         <span className="font-bold text-primary-700 text-sm shrink-0">{formatCurrency(b.total)}</span>
-        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${st.color}`}>{st.label}</span>
+        <BudgetStatusBadge b={b} />
         <BudgetActions b={b} {...h} />
       </div>
     </div>
@@ -440,6 +449,12 @@ export function LeadDetail() {
   }
   function exportBudget(b: Budget) {
     exportBudgetPdf(b, budgetIssuer(b))
+  }
+  async function deleteBudget(b: Budget) {
+    if (!window.confirm(`¿Borrar "${b.concept || 'este presupuesto'}"?`)) return
+    const { error } = await supabase.from('budgets').delete().eq('id', b.id)
+    if (error) { toast.error('No se pudo borrar'); return }
+    toast.success('Presupuesto borrado'); loadRelated()
   }
 
   // Abre el asistente de presupuesto con los datos del lead ya rellenados.
@@ -1080,6 +1095,7 @@ export function LeadDetail() {
                       budgets={group}
                       onWhatsApp={budgetWhatsApp}
                       onExport={exportBudget}
+                      onDelete={deleteBudget}
                       onOpen={() => navigate('/budgets')}
                       onCompare={() => exportBudgetComparison(group, budgetIssuer(group[0]))}
                     />
@@ -1089,6 +1105,7 @@ export function LeadDetail() {
                       b={group[0]}
                       onWhatsApp={budgetWhatsApp}
                       onExport={exportBudget}
+                      onDelete={deleteBudget}
                       onOpen={() => navigate('/budgets')}
                     />
                   ))}
@@ -1750,6 +1767,7 @@ export function LeadDetail() {
           orgName={organization.name}
           onClose={() => setBudgetWizard(null)}
           onSaved={() => loadRelated()}
+          onEditBudget={() => { setBudgetWizard(null); navigate('/budgets') }}
         />
       )}
     </div>
