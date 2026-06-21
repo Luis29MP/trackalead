@@ -5,7 +5,7 @@ import {
   MessageSquare, Activity, User, DollarSign, CheckCircle, Clock,
   Trash2, Wrench, Building2, MessageCircle, ChevronRight, Calendar,
   AlertCircle, Share2, Link, Copy, Check, Trash,
-  CalendarPlus, Home, PhoneCall, RefreshCw, ClipboardList, FileText, Download, Sparkles,
+  CalendarPlus, Home, PhoneCall, RefreshCw, ClipboardList, FileText, Download, Sparkles, Layers,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
@@ -27,7 +27,7 @@ import {
   formatCurrency, formatDate, formatDateTime, formatRelativeTime,
   getInitials, sourceLabel, calculateCommission, toLocalInput, toUTCIso,
 } from '@/lib/utils'
-import { exportBudgetPdf, type PdfOrgInfo } from '@/lib/budgetPdf'
+import { exportBudgetPdf, exportBudgetComparison, type PdfOrgInfo } from '@/lib/budgetPdf'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
 import { BudgetWizard, emptyDraft, type Draft } from './Budgets'
 import type { BoardColumn, CalendarEvent, EventType, LeadComment, LeadActivity, LeadFile, Professional, Budget } from '@/types'
@@ -71,6 +71,91 @@ function blobToResizedImage(blob: Blob): Promise<{ dataUrl: string; mime: string
     img.onerror = () => { URL.revokeObjectURL(url); resolve(null) }
     img.src = url
   })
+}
+
+// ── Presupuestos en la ficha: fila simple y grupo de opciones con pestañas ──────
+type BudgetRowHandlers = {
+  onWhatsApp: (b: Budget) => void
+  onExport: (b: Budget) => void
+  onOpen: (b: Budget) => void
+}
+
+// Agrupa los presupuestos por group_id (conservando el orden); los sueltos van solos.
+function groupLeadBudgets(budgets: Budget[]): Budget[][] {
+  const seen = new Set<string>()
+  const out: Budget[][] = []
+  for (const b of budgets) {
+    if (b.group_id) {
+      if (seen.has(b.group_id)) continue
+      seen.add(b.group_id)
+      out.push(budgets.filter(x => x.group_id === b.group_id))
+    } else out.push([b])
+  }
+  return out
+}
+
+function optionTabLabel(b: Budget, i: number): string {
+  const m = (b.concept || '').match(/(opci[oó]n|alternativa|variante)\s*[\wáéíó]+$/i)
+  return m ? m[0] : `Opción ${i + 1}`
+}
+
+function BudgetActions({ b, onWhatsApp, onExport, onOpen }: { b: Budget } & BudgetRowHandlers) {
+  return (
+    <div className="flex items-center gap-1 shrink-0">
+      <button onClick={() => onWhatsApp(b)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-500" title="Enviar por WhatsApp"><MessageCircle className="h-3.5 w-3.5" /></button>
+      <button onClick={() => onExport(b)} className="p-1.5 rounded hover:bg-blue-50 text-blue-500" title="Exportar PDF"><Download className="h-3.5 w-3.5" /></button>
+      <button onClick={() => onOpen(b)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400" title="Abrir en Presupuestos"><ChevronRight className="h-3.5 w-3.5" /></button>
+    </div>
+  )
+}
+
+function SingleBudgetRow({ b, ...h }: { b: Budget } & BudgetRowHandlers) {
+  const st = BUDGET_STATUS[b.status] ?? BUDGET_STATUS.draft
+  return (
+    <div className="flex items-center gap-3 border border-gray-100 rounded-lg px-3 py-2.5">
+      <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0"><FileText className="h-4 w-4 text-primary-600" /></div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-gray-800 truncate">{b.concept || 'Presupuesto'}</p>
+        <p className="text-xs text-gray-400">{formatDate(b.created_at)} · {b.lines?.length ?? 0} líneas</p>
+      </div>
+      <span className="font-semibold text-gray-900 text-sm shrink-0">{formatCurrency(b.total)}</span>
+      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${st.color}`}>{st.label}</span>
+      <BudgetActions b={b} {...h} />
+    </div>
+  )
+}
+
+// Grupo de opciones: pestañas Opción 1/2/3; el total mostrado es SOLO el de la activa.
+function BudgetOptionsGroup({ budgets, onCompare, ...h }: { budgets: Budget[]; onCompare: () => void } & BudgetRowHandlers) {
+  const [active, setActive] = useState(0)
+  const b = budgets[active] ?? budgets[0]
+  const st = BUDGET_STATUS[b.status] ?? BUDGET_STATUS.draft
+  const base = (budgets[0].concept || 'Presupuesto').replace(/\s*[-–]\s*(opci[oó]n|alternativa|variante).*$/i, '').trim()
+  return (
+    <div className="border border-primary-200 rounded-lg overflow-hidden">
+      <div className="flex items-center justify-between gap-2 bg-primary-50/60 px-3 py-2 border-b border-primary-100">
+        <p className="text-sm font-semibold text-gray-800 truncate flex items-center gap-1.5"><Layers className="h-3.5 w-3.5 text-primary-600" />{base} · {budgets.length} opciones</p>
+        <Button size="sm" variant="outline" className="gap-1.5 text-xs shrink-0" onClick={onCompare}><Download className="h-3.5 w-3.5" />Exportar comparativa</Button>
+      </div>
+      <div className="flex gap-1 px-3 pt-2 flex-wrap">
+        {budgets.map((opt, i) => (
+          <button key={opt.id} onClick={() => setActive(i)}
+            className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${i === active ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            {optionTabLabel(opt, i)} · {formatCurrency(opt.total)}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-3 px-3 py-2.5">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-gray-800 truncate">{b.concept || 'Presupuesto'}</p>
+          <p className="text-xs text-gray-400">{formatDate(b.created_at)} · {b.lines?.length ?? 0} líneas</p>
+        </div>
+        <span className="font-bold text-primary-700 text-sm shrink-0">{formatCurrency(b.total)}</span>
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${st.color}`}>{st.label}</span>
+        <BudgetActions b={b} {...h} />
+      </div>
+    </div>
+  )
 }
 
 // ── Helpers de parsing de PDF ────────────────────────────────────────────────
@@ -989,27 +1074,24 @@ export function LeadDetail() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {leadBudgets.map(b => {
-                    const st = BUDGET_STATUS[b.status] ?? BUDGET_STATUS.draft
-                    return (
-                      <div key={b.id} className="flex items-center gap-3 border border-gray-100 rounded-lg px-3 py-2.5">
-                        <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
-                          <FileText className="h-4 w-4 text-primary-600" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-gray-800 truncate">{b.concept || 'Presupuesto'}</p>
-                          <p className="text-xs text-gray-400">{formatDate(b.created_at)} · {b.lines?.length ?? 0} líneas</p>
-                        </div>
-                        <span className="font-semibold text-gray-900 text-sm shrink-0">{formatCurrency(b.total)}</span>
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${st.color}`}>{st.label}</span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button onClick={() => budgetWhatsApp(b)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-500" title="Enviar por WhatsApp"><MessageCircle className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => exportBudget(b)} className="p-1.5 rounded hover:bg-blue-50 text-blue-500" title="Exportar PDF"><Download className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => navigate('/budgets')} className="p-1.5 rounded hover:bg-gray-100 text-gray-400" title="Abrir en Presupuestos"><ChevronRight className="h-3.5 w-3.5" /></button>
-                        </div>
-                      </div>
-                    )
-                  })}
+                  {groupLeadBudgets(leadBudgets).map(group => group.length > 1 ? (
+                    <BudgetOptionsGroup
+                      key={group[0].group_id!}
+                      budgets={group}
+                      onWhatsApp={budgetWhatsApp}
+                      onExport={exportBudget}
+                      onOpen={() => navigate('/budgets')}
+                      onCompare={() => exportBudgetComparison(group, budgetIssuer(group[0]))}
+                    />
+                  ) : (
+                    <SingleBudgetRow
+                      key={group[0].id}
+                      b={group[0]}
+                      onWhatsApp={budgetWhatsApp}
+                      onExport={exportBudget}
+                      onOpen={() => navigate('/budgets')}
+                    />
+                  ))}
                 </div>
               )}
             </TabsContent>

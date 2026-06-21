@@ -10,6 +10,38 @@ export interface GeneratedBudget {
 
 export interface AiImage { mime: string; data: string }  // data = base64 sin prefijo
 
+// ── Opciones / alternativas dentro de un presupuesto ────────────────────────────
+// Detecta líneas con prefijo "Opción 1:", "Alternativa B -", "Variante 2." etc.
+const OPTION_RE = /^\s*(opci[oó]n|alternativa|variante)\s*(\d+|[a-zA-Z])\s*[:\-.)]\s*/i
+function detectOption(concept: string): string | null {
+  const m = concept.match(OPTION_RE)
+  if (!m) return null
+  const kind = m[1].toLowerCase().startsWith('opci') ? 'Opción'
+    : m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase()
+  return `${kind} ${m[2].toUpperCase()}`
+}
+
+// Si las líneas contienen varias opciones, las separa en un presupuesto por opción.
+// Las líneas SIN prefijo de opción (p. ej. "Transporte") son comunes → van en TODAS.
+// Devuelve null si hay menos de 2 opciones (presupuesto normal).
+export function splitBudgetOptions(lines: BudgetLine[]): { label: string; lines: BudgetLine[] }[] | null {
+  const byOption = new Map<string, BudgetLine[]>()
+  const order: string[] = []
+  const common: BudgetLine[] = []
+  for (const l of lines) {
+    const opt = detectOption(l.concept)
+    if (opt) {
+      if (!byOption.has(opt)) { byOption.set(opt, []); order.push(opt) }
+      const clean = l.concept.replace(OPTION_RE, '').trim()
+      byOption.get(opt)!.push({ ...l, concept: clean || l.concept })
+    } else {
+      common.push(l)
+    }
+  }
+  if (order.length < 2) return null
+  return order.map(label => ({ label, lines: [...byOption.get(label)!, ...common] }))
+}
+
 export async function generateBudget(params: {
   clientName: string
   concept: string

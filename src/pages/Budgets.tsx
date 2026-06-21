@@ -7,7 +7,7 @@ import {
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { generateBudget, generateBudgetSplit, type AiImage } from '@/lib/ai'
+import { generateBudget, generateBudgetSplit, splitBudgetOptions, type AiImage } from '@/lib/ai'
 import { fetchProKnowledgeText } from '@/lib/proKnowledge'
 import { exportBudgetPdf, type PdfOrgInfo } from '@/lib/budgetPdf'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
@@ -429,9 +429,16 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
           images: aiImages,
           knowledge,
         })
-        setDraft(d => ({ ...d, lines: result.lines, notes: result.notes || d.notes }))
-        toast.success('Presupuesto generado con IA')
-        setStep(3)
+        // Si la IA generó varias opciones/alternativas → un presupuesto por opción
+        const options = splitBudgetOptions(result.lines)
+        if (options) {
+          await saveOptions(options, result.notes || draft.notes)
+          toast.success(`${options.length} opciones generadas`)
+        } else {
+          setDraft(d => ({ ...d, lines: result.lines, notes: result.notes || d.notes }))
+          toast.success('Presupuesto generado con IA')
+          setStep(3)
+        }
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al generar con IA')
@@ -443,6 +450,42 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
     } finally {
       setGenerating(false)
     }
+  }
+
+  // Guarda N presupuestos (uno por OPCIÓN/alternativa) con un group_id común
+  async function saveOptions(options: { label: string; lines: BudgetLine[] }[], notes: string) {
+    const now = new Date().toISOString()
+    const groupId = crypto.randomUUID()
+    const base = (draft.concept || 'Presupuesto').trim()
+    const created: Budget[] = []
+    for (const opt of options) {
+      const t = recalc(opt.lines, draft.vat_percent)
+      const { data } = await supabase.from('budgets').insert({
+        org_id: orgId,
+        lead_id: draft.lead_id,
+        group_id: groupId,
+        created_by: userId,
+        professional_id: draft.professional_id,
+        client_name: draft.client_name,
+        client_phone: draft.client_phone || null,
+        client_address: draft.client_address || null,
+        concept: `${base} - ${opt.label}`,
+        lines: opt.lines,
+        subtotal: t.subtotal,
+        vat_percent: draft.vat_percent,
+        vat_amount: t.vat_amount,
+        total: t.total,
+        margin_percent: draft.margin_percent,
+        validity_days: draft.validity_days,
+        notes: notes || null,
+        status: 'draft',
+        ai_generated: true,
+        updated_at: now,
+      }).select().single()
+      if (data) created.push(data as Budget)
+    }
+    setSplitResults(created)
+    onSaved()
   }
 
   // Guarda N presupuestos (uno por gremio) y muestra el resumen

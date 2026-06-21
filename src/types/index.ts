@@ -199,6 +199,7 @@ export interface Budget {
   id: string
   org_id: string
   lead_id: string | null
+  group_id?: string | null   // agrupa opciones/alternativas del mismo trabajo
   created_by: string | null
   professional_id?: string | null
   client_name: string | null
