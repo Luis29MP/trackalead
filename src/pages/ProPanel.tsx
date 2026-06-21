@@ -1,15 +1,16 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { Phone, MapPin, Wrench, Upload, MessageCircle, Send, Radar, AlertCircle, ArrowLeft, FileText, Plus, Trash2, Check, X, Sparkles, Settings } from 'lucide-react'
+import { Phone, MapPin, Wrench, Upload, MessageCircle, Send, Radar, AlertCircle, ArrowLeft, FileText, Plus, Trash2, Check, X, Sparkles, Settings, Eye } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { generateBudget } from '@/lib/ai'
+import { viewBudgetPdf } from '@/lib/budgetPdf'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { formatCurrency } from '@/lib/utils'
 import { ProKnowledgeManager } from '@/components/ProKnowledgeManager'
-import type { Professional, Lead, BudgetLine, BudgetPartida, PartidaStatus, ProRate } from '@/types'
+import type { Professional, Lead, Budget, BudgetLine, BudgetPartida, PartidaStatus, ProRate } from '@/types'
 
 type PanelPartida = BudgetPartida & {
   budget: { client_name: string | null; concept: string | null; lead_id: string | null; vat_percent: number } | null
@@ -42,8 +43,9 @@ function toWhatsApp(phone: string) {
 // Presupuestos del profesional (vía RPC pro_budgets)
 interface PanelBudget {
   id: string; group_id: string | null; lead_id: string | null; concept: string | null
-  client_name: string | null; lines: BudgetLine[]; subtotal: number; vat_percent: number
-  vat_amount: number; total: number; status: string; validated_at: string | null
+  client_name: string | null; client_phone: string | null; client_address: string | null
+  lines: BudgetLine[]; subtotal: number; vat_percent: number; vat_amount: number; total: number
+  validity_days: number; status: string; validated_at: string | null
   notes: string | null; created_at: string; lead_name: string | null
 }
 
@@ -56,21 +58,20 @@ function groupProBudgets(budgets: PanelBudget[]): PanelBudget[][] {
   return out
 }
 function optLabel(b: PanelBudget, i: number): string {
-  const m = (b.concept || '').match(/(opci[oó]n|alternativa|variante)\s*[\wáéíó]+$/i)
-  return m ? m[0] : `Opción ${i + 1}`
+  const m = (b.concept || '').match(/(\d+)\s*$/)
+  return `Propuesta ${m ? m[1] : i + 1}`
 }
 
-// Tarjeta de presupuesto en el panel del profesional: ve las opciones y valida.
-function ProBudgetCard({ budgets, onValidate }: { budgets: PanelBudget[]; onValidate: (b: PanelBudget) => void }) {
+// Tarjeta de presupuesto en el panel del profesional: ve las opciones, abre el PDF y valida.
+function ProBudgetCard({ budgets, onValidate, onView }: { budgets: PanelBudget[]; onValidate: (b: PanelBudget) => void; onView: (b: PanelBudget) => void }) {
   const [active, setActive] = useState(0)
   const b = budgets[active] ?? budgets[0]
   const isGroup = budgets.length > 1
-  const base = (budgets[0].concept || 'Presupuesto').replace(/\s*[-–]\s*(opci[oó]n|alternativa|variante).*$/i, '').trim()
   return (
     <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 space-y-3">
       <div>
         <p className="font-semibold text-gray-900 truncate">{b.client_name || b.lead_name || 'Cliente'}</p>
-        <p className="text-sm text-primary-600 font-medium truncate">{base}</p>
+        <p className="text-sm text-primary-600 font-medium truncate">{isGroup ? `${budgets.length} propuestas` : (b.concept || 'Presupuesto')}</p>
       </div>
       {isGroup && (
         <div className="flex gap-1 flex-wrap">
@@ -90,11 +91,14 @@ function ProBudgetCard({ budgets, onValidate }: { budgets: PanelBudget[]; onVali
           </div>
         ))}
       </div>
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-sm font-bold text-gray-900">Total: {formatCurrency(b.total)}</span>
-        {b.validated_at
-          ? <span className="text-[12px] font-semibold text-green-600 flex items-center gap-1"><Check className="h-4 w-4" />Validado</span>
-          : <Button size="sm" className="gap-1.5 bg-green-600 hover:bg-green-700" onClick={() => onValidate(b)}><Check className="h-4 w-4" />Validar</Button>}
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onView(b)}><Eye className="h-4 w-4" />Ver</Button>
+          {b.validated_at
+            ? <span className="text-[12px] font-semibold text-green-600 flex items-center gap-1"><Check className="h-4 w-4" />Validado</span>
+            : <Button size="sm" className="gap-1.5 bg-green-600 hover:bg-green-700" onClick={() => onValidate(b)}><Check className="h-4 w-4" />Validar</Button>}
+        </div>
       </div>
     </div>
   )
@@ -607,7 +611,12 @@ export function ProPanel() {
               <p className="text-sm text-gray-400">Revisa las opciones y valídalas. Al validar, el gestor recibe un aviso.</p>
             </div>
             {groupProBudgets(budgets).map(group => (
-              <ProBudgetCard key={group[0].group_id ?? group[0].id} budgets={group} onValidate={validateBudget} />
+              <ProBudgetCard
+                key={group[0].group_id ?? group[0].id}
+                budgets={group}
+                onValidate={validateBudget}
+                onView={(x) => viewBudgetPdf(x as unknown as Budget, { name: professional?.company_name || professional?.name })}
+              />
             ))}
           </div>
         )}

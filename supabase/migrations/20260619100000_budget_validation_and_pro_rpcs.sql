@@ -11,9 +11,10 @@ BEGIN
   RETURN coalesce((
     SELECT jsonb_agg(jsonb_build_object(
       'id', b.id, 'group_id', b.group_id, 'lead_id', b.lead_id, 'concept', b.concept,
-      'client_name', b.client_name, 'lines', b.lines, 'subtotal', b.subtotal,
-      'vat_percent', b.vat_percent, 'vat_amount', b.vat_amount, 'total', b.total,
-      'status', b.status, 'validated_at', b.validated_at, 'notes', b.notes, 'created_at', b.created_at,
+      'client_name', b.client_name, 'client_phone', b.client_phone, 'client_address', b.client_address,
+      'lines', b.lines, 'subtotal', b.subtotal, 'vat_percent', b.vat_percent, 'vat_amount', b.vat_amount,
+      'total', b.total, 'validity_days', b.validity_days, 'status', b.status, 'validated_at', b.validated_at,
+      'notes', b.notes, 'created_at', b.created_at,
       'lead_name', (SELECT le.name FROM leads le WHERE le.id = b.lead_id)
     ) ORDER BY b.created_at DESC)
     FROM budgets b

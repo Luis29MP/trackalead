@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   FileText, Plus, Sparkles, Download, Pencil, Trash2, Search,
-  ArrowLeft, ArrowRight, Check, ImagePlus, X, Layers, CheckCircle2, MessageCircle,
+  ArrowLeft, ArrowRight, Check, ImagePlus, X, Layers, CheckCircle2, MessageCircle, Eye,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { generateBudget, generateBudgetSplit, splitBudgetOptions, type AiImage } from '@/lib/ai'
 import { fetchProKnowledgeText } from '@/lib/proKnowledge'
-import { exportBudgetPdf, exportBudgetComparison, type PdfOrgInfo } from '@/lib/budgetPdf'
+import { exportBudgetPdf, viewBudgetPdf, exportBudgetComparison, type PdfOrgInfo } from '@/lib/budgetPdf'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -459,9 +459,9 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
   async function saveOptions(options: { label: string; lines: BudgetLine[] }[], notes: string) {
     const now = new Date().toISOString()
     const groupId = crypto.randomUUID()
-    const base = (draft.concept || 'Presupuesto').trim()
     const created: Budget[] = []
-    for (const opt of options) {
+    for (let i = 0; i < options.length; i++) {
+      const opt = options[i]
       const t = recalc(opt.lines, draft.vat_percent)
       const { data } = await supabase.from('budgets').insert({
         org_id: orgId,
@@ -472,7 +472,7 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
         client_name: draft.client_name,
         client_phone: draft.client_phone || null,
         client_address: draft.client_address || null,
-        concept: `${base} - ${opt.label}`,
+        concept: `Propuesta de presupuesto ${i + 1}`,
         lines: opt.lines,
         subtotal: t.subtotal,
         vat_percent: draft.vat_percent,
@@ -657,33 +657,41 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
             </div>
             <div className="space-y-2">
               {splitResults.map(b => (
-                <div key={b.id} className="flex items-center gap-2 border border-gray-100 rounded-lg px-3 py-2.5">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-gray-800 truncate">{b.concept}</p>
-                    <p className="text-xs text-gray-400">{b.lines.length} líneas · {formatCurrency(b.total)}</p>
+                <div key={b.id} className="border border-gray-100 rounded-lg p-3 space-y-2.5">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="text-sm font-semibold text-gray-800">{b.concept}</p>
+                    <p className="text-sm font-bold text-primary-700 shrink-0">{formatCurrency(b.total)}</p>
                   </div>
-                  {onEditBudget && (
-                    <Button size="sm" variant="outline" className="gap-1 shrink-0 h-8 text-xs" onClick={() => onEditBudget(b)} title="Ver / Editar">
-                      <Pencil className="h-3.5 w-3.5" />Editar
+                  <p className="text-xs text-gray-400">{b.lines.length} líneas</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Button size="sm" variant="outline" className="gap-1 h-8 text-xs" onClick={() => viewBudgetPdf(b, buildIssuer(b, professionals, orgName))}>
+                      <Eye className="h-3.5 w-3.5" />Ver
                     </Button>
-                  )}
-                  <button onClick={() => exportBudgetPdf(b, buildIssuer(b, professionals, orgName))} className="p-1.5 rounded hover:bg-blue-50 text-blue-500 shrink-0" title="Exportar PDF"><Download className="h-4 w-4" /></button>
-                  <button onClick={() => deleteOneResult(b)} className="p-1.5 rounded hover:bg-red-50 text-red-400 shrink-0" title="Borrar esta opción"><Trash2 className="h-4 w-4" /></button>
+                    {onEditBudget && (
+                      <Button size="sm" variant="outline" className="gap-1 h-8 text-xs" onClick={() => onEditBudget(b)}>
+                        <Pencil className="h-3.5 w-3.5" />Editar
+                      </Button>
+                    )}
+                    <Button size="sm" variant="outline" className="gap-1 h-8 text-xs" onClick={() => exportBudgetPdf(b, buildIssuer(b, professionals, orgName))}>
+                      <Download className="h-3.5 w-3.5" />PDF
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-1 h-8 text-xs text-red-600 border-red-200" onClick={() => deleteOneResult(b)}>
+                      <Trash2 className="h-3.5 w-3.5" />Borrar
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
-            <div className="flex flex-wrap justify-between gap-2 pt-1">
-              <div className="flex gap-2">
-                {isOptions && (
-                  <Button variant="outline" className="gap-1.5" onClick={() => exportBudgetComparison(splitResults, buildIssuer(splitResults[0], professionals, orgName))}>
-                    <Layers className="h-4 w-4" />Exportar comparativa
-                  </Button>
-                )}
-                <Button variant="outline" className="gap-1.5 text-red-600 border-red-200" onClick={deleteAllResults}>
-                  <Trash2 className="h-4 w-4" />Borrar {isOptions ? 'grupo' : 'todos'}
+            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+              {isOptions && (
+                <Button variant="outline" className="gap-1.5 w-full sm:w-auto" onClick={() => exportBudgetComparison(splitResults, buildIssuer(splitResults[0], professionals, orgName))}>
+                  <Layers className="h-4 w-4" />Exportar comparativa
                 </Button>
-              </div>
-              <Button onClick={onClose}>Hecho</Button>
+              )}
+              <Button variant="outline" className="gap-1.5 text-red-600 border-red-200 w-full sm:w-auto" onClick={deleteAllResults}>
+                <Trash2 className="h-4 w-4" />Borrar {isOptions ? 'grupo' : 'todos'}
+              </Button>
+              <Button className="w-full sm:w-auto sm:ml-auto" onClick={onClose}>Hecho</Button>
             </div>
           </div>
             )

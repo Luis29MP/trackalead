@@ -192,10 +192,17 @@ export function exportBudgetPdf(budget: Budget, org: PdfOrgInfo = {}) {
   doc.save(fileName)
 }
 
-// Etiqueta de la opción ("Opción 1") a partir del concepto "Base - Opción 1"
+// Abre el PDF en una pestaña nueva del navegador (sin descargar) — para revisar/validar
+export function viewBudgetPdf(budget: Budget, org: PdfOrgInfo = {}) {
+  const { doc } = buildDoc(budget, org)
+  const url = doc.output('bloburl') as unknown as string
+  window.open(url, '_blank', 'noopener')
+}
+
+// Etiqueta corta de la propuesta ("Propuesta 1") a partir del nº final del concepto
 function optionLabel(b: Budget, i: number): string {
-  const m = (b.concept || '').match(/(opci[oó]n|alternativa|variante)\s*[\w]+$/i)
-  return m ? m[0] : `Opción ${i + 1}`
+  const m = (b.concept || '').match(/(\d+)\s*$/)
+  return `Propuesta ${m ? m[1] : i + 1}`
 }
 
 // ── PDF comparativo: varias opciones del mismo trabajo en un único documento ────
@@ -206,7 +213,7 @@ export function exportBudgetComparison(budgets: Budget[], org: PdfOrgInfo = {}) 
   const marginX = 14
   let y = 16
   const first = budgets[0]
-  const baseTitle = (first.concept || 'Presupuesto').replace(/\s*[-–]\s*(opci[oó]n|alternativa|variante).*$/i, '').trim()
+  const baseTitle = `Comparativa de ${budgets.length} propuestas`
 
   // ── Cabecera ───────────────────────────────────────────────────────────────
   let logoW = 0
