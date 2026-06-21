@@ -149,7 +149,7 @@ serve(async (req) => {
     const maxTokens = Number(max_tokens) || 1500
     const webSearch = !!web_search
     const imgParts: ImagePart[] = Array.isArray(images)
-      ? images.filter((i: ImagePart) => i?.mime && i?.data).slice(0, 6)
+      ? images.filter((i: ImagePart) => i?.mime && i?.data).slice(0, 10)
       : []
 
     const kek = Deno.env.get('AI_KEYS_KEK')
