@@ -29,6 +29,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { formatCurrency, formatRelativeTime, sourceLabel } from '@/lib/utils'
 import { ImportTrello } from '@/components/ImportTrello'
 import { DeleteBoardDialog } from '@/components/DeleteBoardDialog'
+import { BUDGET_STATE_META } from '@/lib/budgetState'
 import type { Board, Lead, BoardColumn } from '@/types'
 
 // ── Smart paste ───────────────────────────────────────────────────────────────────
@@ -104,13 +105,19 @@ function LeadCard({ lead, columns, onClick, onMove }: {
           </div>
         )}
 
-        {/* Footer: presupuesto + fecha */}
-        <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-gray-100">
-          {lead.budget_amount
-            ? <span className="text-xs font-bold text-amber-600">{formatCurrency(lead.budget_amount)}</span>
-            : <span />
-          }
-          <div className="flex items-center gap-1 text-[11px] text-gray-400">
+        {/* Footer: estado presupuesto + importe + fecha */}
+        <div className="flex items-center justify-between gap-1 mt-1.5 pt-1.5 border-t border-gray-100">
+          <div className="flex items-center gap-1.5 min-w-0">
+            {lead.budget_state && (
+              <span title={BUDGET_STATE_META[lead.budget_state].label}
+                className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${BUDGET_STATE_META[lead.budget_state].color}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${BUDGET_STATE_META[lead.budget_state].dot}`} />
+                {BUDGET_STATE_META[lead.budget_state].label.split(' ')[0]}
+              </span>
+            )}
+            {lead.budget_amount ? <span className="text-xs font-bold text-amber-600 shrink-0">{formatCurrency(lead.budget_amount)}</span> : null}
+          </div>
+          <div className="flex items-center gap-1 text-[11px] text-gray-400 shrink-0">
             <Calendar className="h-3 w-3" />
             {formatRelativeTime(lead.created_at)}
           </div>

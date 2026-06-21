@@ -100,6 +100,7 @@ export interface Lead {
   assigned_to: string | null
   is_read: boolean            // false = badge "NUEVO"
   position: number | null     // orden manual dentro de la columna (p. ej. orden de Trello)
+  budget_state?: BudgetState | null   // estado de presupuesto/factura (calculado, no en BD)
   public_token: string | null // token para enlace público compartible
   budget_amount: number | null
   commission_amount: number | null
@@ -168,6 +169,41 @@ export interface Professional {
 }
 
 export type BudgetStatus = 'draft' | 'sent' | 'accepted' | 'rejected'
+
+// Estado de presupuestación de un lead (de menos a más avanzado) para los badges
+export type BudgetState = 'pendiente' | 'enviado' | 'validado' | 'facturado'
+
+export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'cancelled'
+
+export interface Invoice {
+  id: string
+  org_id: string
+  lead_id: string | null
+  budget_id: string | null
+  professional_id: string | null
+  invoice_number: string
+  invoice_series: string | null
+  auto_number: boolean
+  status: InvoiceStatus
+  client_name: string | null
+  client_nif: string | null
+  client_address: string | null
+  client_email: string | null
+  client_phone: string | null
+  items: BudgetLine[]
+  subtotal: number
+  tax_rate: number
+  tax_amount: number
+  total: number
+  issue_date: string | null
+  due_date: string | null
+  paid_at: string | null
+  notes: string | null
+  payment_method: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
 
 // Estado de una partida de cara al profesional asignado
 export type PartidaStatus = 'pending' | 'accepted' | 'rejected' | 'done'

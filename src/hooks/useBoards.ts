@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import type { Board, BoardColumn } from '@/types'
+import type { Board, BoardColumn, BudgetState } from '@/types'
 import { useAuth } from '@/context/AuthContext'
 
 // Columnas estándar de un tablero de captación de leads
@@ -143,10 +143,26 @@ export function useBoardColumns(boardId: string) {
         .order('position', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: false })
 
+      // Estado de presupuesto/factura por lead (para los badges de la tarjeta)
+      const leadIds = (leads ?? []).map(l => l.id)
+      const stateByLead: Record<string, BudgetState | null> = {}
+      if (leadIds.length) {
+        const { computeBudgetState } = await import('@/lib/budgetState')
+        const [{ data: bgs }, { data: invs }] = await Promise.all([
+          supabase.from('budgets').select('lead_id, status, validated_at').in('lead_id', leadIds),
+          supabase.from('invoices').select('lead_id').in('lead_id', leadIds),
+        ])
+        const invSet = new Set((invs ?? []).map(i => i.lead_id))
+        const byLead: Record<string, { status: string; validated_at: string | null }[]> = {}
+        for (const b of bgs ?? []) (byLead[b.lead_id] ??= []).push(b)
+        for (const lid of leadIds) stateByLead[lid] = computeBudgetState(byLead[lid] ?? [], invSet.has(lid))
+      }
+
       setColumns(
         cols.map((col) => ({
           ...col,
-          leads: (leads ?? []).filter((l) => l.column_id === col.id),
+          leads: (leads ?? []).filter((l) => l.column_id === col.id)
+            .map(l => ({ ...l, budget_state: stateByLead[l.id] ?? null })),
         }))
       )
     } catch {

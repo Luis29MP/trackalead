@@ -5,7 +5,7 @@ import {
   MessageSquare, Activity, User, DollarSign, CheckCircle, Clock,
   Trash2, Wrench, Building2, MessageCircle, ChevronRight, Calendar,
   AlertCircle, Share2, Link, Copy, Check, Trash,
-  CalendarPlus, Home, PhoneCall, RefreshCw, ClipboardList, FileText, Download, Sparkles, Layers, Eye,
+  CalendarPlus, Home, PhoneCall, RefreshCw, ClipboardList, FileText, Download, Sparkles, Layers, Eye, Receipt, Send, Plus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
@@ -28,9 +28,13 @@ import {
   getInitials, sourceLabel, calculateCommission, toLocalInput, toUTCIso,
 } from '@/lib/utils'
 import { exportBudgetPdf, viewBudgetPdf, exportBudgetComparison, type PdfOrgInfo } from '@/lib/budgetPdf'
+import { BUDGET_STATE_META, computeBudgetState } from '@/lib/budgetState'
+import { exportInvoicePdf, viewInvoicePdf } from '@/lib/invoicePdf'
+import { InvoiceForm } from '@/components/InvoiceForm'
+import { INVOICE_STATUS } from '@/pages/Invoices'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
 import { BudgetWizard, emptyDraft, type Draft } from './Budgets'
-import type { BoardColumn, CalendarEvent, EventType, LeadComment, LeadActivity, LeadFile, Professional, Budget } from '@/types'
+import type { BoardColumn, CalendarEvent, EventType, LeadComment, LeadActivity, LeadFile, Professional, Budget, Invoice } from '@/types'
 
 const BUDGET_STATUS: Record<string, { label: string; color: string }> = {
   draft:    { label: 'Borrador', color: 'bg-gray-100 text-gray-600' },
@@ -78,6 +82,7 @@ type BudgetRowHandlers = {
   onWhatsApp: (b: Budget) => void
   onView: (b: Budget) => void
   onExport: (b: Budget) => void
+  onInvoice: (b: Budget) => void
   onOpen: (b: Budget) => void
   onDelete: (b: Budget) => void
 }
@@ -110,10 +115,11 @@ function optionTabLabel(b: Budget, i: number): string {
   return `Propuesta ${m ? m[1] : i + 1}`
 }
 
-function BudgetActions({ b, onWhatsApp, onView, onExport, onOpen, onDelete }: { b: Budget } & BudgetRowHandlers) {
+function BudgetActions({ b, onWhatsApp, onView, onExport, onInvoice, onOpen, onDelete }: { b: Budget } & BudgetRowHandlers) {
   return (
     <div className="flex items-center gap-1 shrink-0">
       <button onClick={() => onView(b)} className="p-1.5 rounded hover:bg-primary-50 text-primary-600" title="Ver en el navegador"><Eye className="h-3.5 w-3.5" /></button>
+      <button onClick={() => onInvoice(b)} className="p-1.5 rounded hover:bg-purple-50 text-purple-600" title="Convertir a factura"><Receipt className="h-3.5 w-3.5" /></button>
       <button onClick={() => onWhatsApp(b)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-500" title="Enviar por WhatsApp"><MessageCircle className="h-3.5 w-3.5" /></button>
       <button onClick={() => onExport(b)} className="p-1.5 rounded hover:bg-blue-50 text-blue-500" title="Descargar PDF"><Download className="h-3.5 w-3.5" /></button>
       <button onClick={() => onDelete(b)} className="p-1.5 rounded hover:bg-red-50 text-red-400" title="Borrar"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -336,8 +342,12 @@ export function LeadDetail() {
   const [files,        setFiles]        = useState<LeadFile[]>([])
   const [professionals,setProfessionals] = useState<Professional[]>([])
   const [leadBudgets,  setLeadBudgets]   = useState<Budget[]>([])
+  const [leadInvoices, setLeadInvoices]  = useState<Invoice[]>([])
   const [budgetWizard, setBudgetWizard]  = useState<Draft | null>(null)
   const [preparingBudget, setPreparingBudget] = useState(false)
+  const [invoiceOpen, setInvoiceOpen]    = useState(false)
+  const [invoiceBudget, setInvoiceBudget] = useState<Budget | null>(null)
+  const [editInvoice, setEditInvoice]    = useState<Invoice | null>(null)
   const [columns,      setColumns]      = useState<BoardColumn[]>([])
   const [newComment,   setNewComment]   = useState('')
   const [uploading,    setUploading]    = useState(false)
@@ -422,18 +432,20 @@ export function LeadDetail() {
   async function loadRelated() {
     if (!id) return
     try {
-      const [{ data: c }, { data: a }, { data: f }, { data: ev }, { data: bg }] = await Promise.all([
+      const [{ data: c }, { data: a }, { data: f }, { data: ev }, { data: bg }, { data: inv }] = await Promise.all([
         supabase.from('lead_comments').select('*, profile:profiles(id,full_name,email)').eq('lead_id', id).order('created_at'),
         supabase.from('lead_activity').select('*, profile:profiles(id,full_name)').eq('lead_id', id).order('created_at', { ascending: false }).limit(30),
         supabase.from('lead_files').select('*').eq('lead_id', id).order('created_at'),
         supabase.from('calendar_events').select('*').eq('lead_id', id).order('start_at'),
         supabase.from('budgets').select('*').eq('lead_id', id).order('created_at', { ascending: false }),
+        supabase.from('invoices').select('*').eq('lead_id', id).order('created_at', { ascending: false }),
       ])
       setComments(c ?? [])
       setActivities(a ?? [])
       setFiles(f ?? [])
       setLeadEvents(ev ?? [])
       setLeadBudgets((bg ?? []) as Budget[])
+      setLeadInvoices((inv ?? []) as Invoice[])
     } catch (err) {
       console.error('[loadRelated]', err)
     }
@@ -456,6 +468,27 @@ export function LeadDetail() {
     const { error } = await supabase.from('budgets').delete().eq('id', b.id)
     if (error) { toast.error('No se pudo borrar'); return }
     toast.success('Presupuesto borrado'); loadRelated()
+  }
+
+  // ── Facturas del lead ───────────────────────────────────────────────────────
+  function invoiceIssuer(inv: Invoice): PdfOrgInfo {
+    const pro = professionals.find(p => p.id === inv.professional_id)
+    if (pro && (pro.company_name || pro.logo_url)) {
+      const addr = [pro.address, pro.cif ? `NIF: ${pro.cif}` : null].filter(Boolean).join('  ·  ')
+      return { name: pro.company_name || pro.name, phone: pro.phone, email: pro.email, address: addr || null, logoUrl: pro.logo_url ?? null }
+    }
+    return { name: organization?.name }
+  }
+  async function setInvoiceStatus(inv: Invoice, status: 'sent' | 'paid') {
+    const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() }
+    if (status === 'paid') patch.paid_at = new Date().toISOString().slice(0, 10)
+    await supabase.from('invoices').update(patch).eq('id', inv.id)
+    toast.success(status === 'sent' ? 'Marcada como enviada' : 'Marcada como pagada'); loadRelated()
+  }
+  async function deleteInvoice(inv: Invoice) {
+    if (!window.confirm(`¿Borrar la factura ${inv.invoice_number}?`)) return
+    await supabase.from('invoices').delete().eq('id', inv.id)
+    toast.success('Factura borrada'); loadRelated()
   }
 
   // Abre el asistente de presupuesto con los datos del lead ya rellenados.
@@ -961,6 +994,16 @@ export function LeadDetail() {
             {lead.is_read === false && (
               <span className="text-[10px] font-black bg-red-500 text-white rounded px-1.5 py-0.5 shrink-0">NUEVO</span>
             )}
+            {(() => {
+              const bs = computeBudgetState(leadBudgets, leadInvoices.length > 0)
+              if (!bs) return null
+              const m = BUDGET_STATE_META[bs]
+              return (
+                <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${m.color}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${m.dot}`} />{m.label}
+                </span>
+              )
+            })()}
           </div>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap text-xs">
             {boardData && (
@@ -1072,6 +1115,10 @@ export function LeadDetail() {
                 <FileText className="h-3.5 w-3.5 mr-1.5" />
                 Presupuestos ({leadBudgets.length})
               </TabsTrigger>
+              <TabsTrigger value="invoices">
+                <Receipt className="h-3.5 w-3.5 mr-1.5" />
+                Facturas ({leadInvoices.length})
+              </TabsTrigger>
             </TabsList>
 
             {/* ── Presupuestos ─────────────────────────────────────────── */}
@@ -1097,6 +1144,7 @@ export function LeadDetail() {
                       onWhatsApp={budgetWhatsApp}
                       onView={(x) => viewBudgetPdf(x, budgetIssuer(x))}
                       onExport={exportBudget}
+                      onInvoice={(x) => { setEditInvoice(null); setInvoiceBudget(x); setInvoiceOpen(true) }}
                       onDelete={deleteBudget}
                       onOpen={() => navigate('/budgets')}
                       onCompare={() => exportBudgetComparison(group, budgetIssuer(group[0]))}
@@ -1108,10 +1156,52 @@ export function LeadDetail() {
                       onWhatsApp={budgetWhatsApp}
                       onView={(x) => viewBudgetPdf(x, budgetIssuer(x))}
                       onExport={exportBudget}
+                      onInvoice={(x) => { setEditInvoice(null); setInvoiceBudget(x); setInvoiceOpen(true) }}
                       onDelete={deleteBudget}
                       onOpen={() => navigate('/budgets')}
                     />
                   ))}
+                </div>
+              )}
+            </TabsContent>
+
+            {/* ── Facturas ─────────────────────────────────────────── */}
+            <TabsContent value="invoices" className="mt-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium text-gray-700">Facturas del cliente</p>
+                <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => { setInvoiceBudget(null); setEditInvoice(null); setInvoiceOpen(true) }}>
+                  <Plus className="h-3.5 w-3.5" />Nueva factura
+                </Button>
+              </div>
+              {leadInvoices.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <Receipt className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">Sin facturas. Conviértelas desde un presupuesto (botón 🧾) o crea una nueva.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {leadInvoices.map(inv => {
+                    const st = INVOICE_STATUS[inv.status]
+                    return (
+                      <div key={inv.id} className="flex items-center gap-3 border border-gray-100 rounded-lg px-3 py-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center shrink-0"><Receipt className="h-4 w-4 text-purple-600" /></div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-800 truncate font-mono">{inv.invoice_number}</p>
+                          <p className="text-xs text-gray-400">{formatDate(inv.issue_date ?? inv.created_at)}</p>
+                        </div>
+                        <span className="font-semibold text-gray-900 text-sm shrink-0">{formatCurrency(inv.total)}</span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${st.color}`}>{st.label}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button onClick={() => viewInvoicePdf(inv, invoiceIssuer(inv))} className="p-1.5 rounded hover:bg-primary-50 text-primary-600" title="Ver"><Eye className="h-3.5 w-3.5" /></button>
+                          {inv.status === 'draft' && <button onClick={() => setInvoiceStatus(inv, 'sent')} className="p-1.5 rounded hover:bg-blue-50 text-blue-500" title="Marcar enviada"><Send className="h-3.5 w-3.5" /></button>}
+                          {(inv.status === 'draft' || inv.status === 'sent') && <button onClick={() => setInvoiceStatus(inv, 'paid')} className="p-1.5 rounded hover:bg-green-50 text-green-600" title="Marcar pagada"><CheckCircle className="h-3.5 w-3.5" /></button>}
+                          <button onClick={() => exportInvoicePdf(inv, invoiceIssuer(inv))} className="p-1.5 rounded hover:bg-blue-50 text-blue-500" title="Descargar PDF"><Download className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => { setInvoiceBudget(null); setEditInvoice(inv); setInvoiceOpen(true) }} className="p-1.5 rounded hover:bg-gray-100 text-gray-500" title="Editar"><Edit2 className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => deleteInvoice(inv)} className="p-1.5 rounded hover:bg-red-50 text-red-400" title="Borrar"><Trash2 className="h-3.5 w-3.5" /></button>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </TabsContent>
@@ -1771,6 +1861,21 @@ export function LeadDetail() {
           onClose={() => setBudgetWizard(null)}
           onSaved={() => loadRelated()}
           onEditBudget={() => { setBudgetWizard(null); navigate('/budgets') }}
+        />
+      )}
+
+      {/* Factura: convertir presupuesto / nueva / editar */}
+      {invoiceOpen && organization && (
+        <InvoiceForm
+          open={invoiceOpen}
+          onOpenChange={setInvoiceOpen}
+          orgId={organization.id}
+          userId={user?.id ?? null}
+          fromBudget={invoiceBudget ?? undefined}
+          invoice={editInvoice ?? undefined}
+          leadId={lead?.id}
+          lead={lead ? { name: lead.name, phone: lead.phone, address: lead.address || lead.zone } : undefined}
+          onSaved={() => loadRelated()}
         />
       )}
     </div>
