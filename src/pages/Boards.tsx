@@ -1,16 +1,19 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Globe, Layers, Check, Trash2, Users, Sparkles } from 'lucide-react'
+import { Plus, Globe, Layers, Check, Trash2, Users, Sparkles, Download } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
+import { supabase } from '@/lib/supabase'
 import { useBoards, STANDARD_COLUMNS } from '@/hooks/useBoards'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatDate } from '@/lib/utils'
 import { DeleteBoardDialog } from '@/components/DeleteBoardDialog'
+import { ImportTrello } from '@/components/ImportTrello'
 import type { Board } from '@/types'
 
 const BOARD_COLORS = [
@@ -71,6 +74,17 @@ export function Boards() {
 
   const [deleteTarget, setDeleteTarget] = useState<Board | null>(null)
 
+  // Importar de Trello: elegir tablero destino y luego importar
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickBoardId, setPickBoardId] = useState('')
+  const [importTarget, setImportTarget] = useState<{ id: string; cols: number } | null>(null)
+  async function startImport() {
+    if (!pickBoardId) { toast.error('Elige un tablero'); return }
+    const { count } = await supabase.from('board_columns').select('*', { count: 'exact', head: true }).eq('board_id', pickBoardId)
+    setImportTarget({ id: pickBoardId, cols: count ?? 0 })
+    setPickerOpen(false)
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -81,11 +95,17 @@ export function Boards() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Tableros</h1>
           <p className="text-gray-500 text-sm mt-1">Gestiona los tableros de captación de leads</p>
         </div>
+        <div className="flex items-center gap-2">
+        {boards.length > 0 && (
+          <Button variant="outline" className="gap-1.5" onClick={() => { setPickBoardId(boards[0]?.id ?? ''); setPickerOpen(true) }}>
+            <Download className="h-4 w-4" />Importar de Trello
+          </Button>
+        )}
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button>
@@ -185,6 +205,7 @@ export function Boards() {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {boards.length === 0 ? (
@@ -217,6 +238,39 @@ export function Boards() {
         onOpenChange={v => { if (!v) setDeleteTarget(null) }}
         onDeleted={() => { setDeleteTarget(null); refetch() }}
       />
+
+      {/* Importar de Trello: elegir tablero destino */}
+      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Download className="h-5 w-5 text-primary-600" />Importar de Trello</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">¿A qué tablero importar las tarjetas?</Label>
+              <Select value={pickBoardId} onValueChange={setPickBoardId}>
+                <SelectTrigger><SelectValue placeholder="Elige un tablero" /></SelectTrigger>
+                <SelectContent>
+                  {boards.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-gray-400">Las listas y tarjetas se añadirán a ese tablero, sin tocar lo que ya tenga.</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setPickerOpen(false)}>Cancelar</Button>
+              <Button onClick={startImport} disabled={!pickBoardId}>Continuar</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {importTarget && (
+        <ImportTrello
+          open={!!importTarget}
+          onOpenChange={v => { if (!v) setImportTarget(null) }}
+          boardId={importTarget.id}
+          existingColumnsCount={importTarget.cols}
+          onImported={refetch}
+        />
+      )}
     </div>
   )
 }

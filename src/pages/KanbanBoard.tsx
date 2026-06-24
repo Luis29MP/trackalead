@@ -13,7 +13,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import {
   Plus, ArrowLeft, Wrench, MapPin, ChevronLeft, ChevronRight,
-  ClipboardPaste, Calendar, Settings2, Trash2, ArrowUp, ArrowDown, Save, Download,
+  ClipboardPaste, Calendar, Settings2, Trash2, ArrowUp, ArrowDown, Save,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBoardColumns } from '@/hooks/useBoards'
@@ -27,7 +27,6 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { formatCurrency, formatRelativeTime, sourceLabel } from '@/lib/utils'
-import { ImportTrello } from '@/components/ImportTrello'
 import { DeleteBoardDialog } from '@/components/DeleteBoardDialog'
 import { BUDGET_STATE_META } from '@/lib/budgetState'
 import type { Board, Lead, BoardColumn } from '@/types'
@@ -400,7 +399,6 @@ export function KanbanBoard() {
   const [geoStatus, setGeoStatus] = useState<'idle' | 'loading' | 'ok' | 'fail'>('idle')
   const [latLng, setLatLng] = useState<{ lat: number; lng: number } | null>(null)
   const [manageOpen, setManageOpen] = useState(false)
-  const [importOpen, setImportOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
@@ -592,11 +590,8 @@ export function KanbanBoard() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* ── Cabecera del tablero ─────────────────────────────────────────── */}
-      <div
-        className="flex items-center gap-3 shrink-0 bg-white border-b border-gray-200"
-        style={{ padding: '12px 24px' }}
-      >
-        <Button variant="ghost" size="icon" onClick={() => navigate('/boards')}>
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0 bg-white border-b border-gray-200 px-3 sm:px-6 py-2.5 sm:py-3">
+        <Button variant="ghost" size="icon" className="shrink-0" onClick={() => navigate('/boards')}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1 min-w-0">
@@ -626,14 +621,11 @@ export function KanbanBoard() {
           </p>
         </div>
 
-        <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => setImportOpen(true)}>
-          <Download className="h-4 w-4" /> Importar de Trello
-        </Button>
-        <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => setManageOpen(true)}>
-          <Settings2 className="h-4 w-4" /> Gestionar listas
+        <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => setManageOpen(true)} title="Gestionar listas">
+          <Settings2 className="h-4 w-4" /><span className="hidden md:inline">Gestionar listas</span>
         </Button>
         <Button size="sm" className="gap-1.5 shrink-0 bg-primary-600 hover:bg-primary-700" onClick={handleNewLead}>
-          <Plus className="h-4 w-4" /> Nuevo lead
+          <Plus className="h-4 w-4" /><span className="hidden sm:inline">Nuevo lead</span><span className="sm:hidden">Nuevo</span>
         </Button>
         <Button variant="ghost" size="icon" className="shrink-0 text-gray-400 hover:text-red-600 hover:bg-red-50" title="Eliminar tablero" onClick={() => setDeleteOpen(true)}>
           <Trash2 className="h-4 w-4" />
@@ -698,15 +690,6 @@ export function KanbanBoard() {
         boardId={boardId!}
         columns={columns}
         onSaved={refetch}
-      />
-
-      {/* Dialog importar de Trello */}
-      <ImportTrello
-        open={importOpen}
-        onOpenChange={setImportOpen}
-        boardId={boardId!}
-        existingColumnsCount={columns.length}
-        onImported={refetch}
       />
 
       {/* Dialog eliminar tablero */}
