@@ -1,0 +1,27 @@
+name: Supabase keep-alive
+
+# Evita que el proyecto de Supabase (plan Free) se pause por inactividad (7 días).
+# Hace un ping diario a la API REST, lo que cuenta como actividad del proyecto.
+# La clave 'anon' es pública (viaja en el bundle del navegador): no es un secreto.
+# NOTA: esto es un parche. La solución real en producción es el plan Pro (no pausa).
+
+on:
+  schedule:
+    - cron: '23 6 * * *'   # cada día a las 06:23 UTC
+  workflow_dispatch:        # permite lanzarlo a mano desde la pestaña Actions
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST
+        env:
+          SUPABASE_URL: https://qplznujisnpwyhrjjuyp.supabase.co
+          SUPABASE_ANON: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFwbHpudWppc25wd3locmpqdXlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzODcwNTUsImV4cCI6MjA5NTk2MzA1NX0.LqKSm4v98KxoPXOqKG0qEUI7lS16fqm2aJLiZJ0qC3M
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/plan_config?select=plan&limit=1" \
+            -H "apikey: $SUPABASE_ANON" -H "Authorization: Bearer $SUPABASE_ANON")
+          echo "Supabase REST respondió HTTP $code"
+          # 200/206/401/403 → el proyecto está DESPIERTO (la petición llegó a la BD)
+          if [ "$code" = "000" ]; then echo "Sin respuesta"; exit 1; fi
