@@ -242,7 +242,8 @@ export function Calendar() {
 
   const filtered = events.filter(e => filterType === 'all' || e.type === filterType)
   const days = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) })
-  const startPadding = startOfMonth(currentMonth).getDay()
+  // Semana empezando en LUNES: getDay() da 0=Dom..6=Sáb → convertir a 0=Lun..6=Dom
+  const startPadding = (startOfMonth(currentMonth).getDay() + 6) % 7
   const upcomingDays = Array.from({ length: 7 }, (_, i) => addDays(new Date(), i))
 
   function openCreateForDay(day: Date) {
@@ -354,7 +355,7 @@ export function Calendar() {
 
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="grid grid-cols-7 border-b border-gray-100">
-              {['D', 'L', 'M', 'X', 'J', 'V', 'S'].map(d => (
+              {['L', 'M', 'X', 'J', 'V', 'S', 'D'].map(d => (
                 <div key={d} className="py-2 text-center text-xs font-bold text-gray-400 uppercase">{d}</div>
               ))}
             </div>
