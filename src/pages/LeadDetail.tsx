@@ -1126,7 +1126,7 @@ export function LeadDetail() {
             <TabsList className="flex-wrap h-auto gap-0.5">
               <TabsTrigger value="visits">
                 <Calendar className="h-3.5 w-3.5 mr-1.5" />
-                Visitas ({leadEvents.length})
+                Agenda ({leadEvents.length})
               </TabsTrigger>
               <TabsTrigger value="comments">
                 <MessageSquare className="h-3.5 w-3.5 mr-1.5" />
@@ -1239,18 +1239,18 @@ export function LeadDetail() {
             {/* ── Visitas ──────────────────────────────────────────── */}
             <TabsContent value="visits" className="mt-4">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium text-gray-700">Visitas y llamadas agendadas</p>
+                <p className="text-sm font-medium text-gray-700">Eventos agendados (visitas, llamadas…)</p>
                 <Button size="sm" variant="outline" onClick={() => setEventDialog(true)} className="gap-1.5 text-xs">
                   <CalendarPlus className="h-3.5 w-3.5" />
-                  Agendar visita
+                  Agendar evento
                 </Button>
               </div>
 
               {leadEvents.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
                   <Calendar className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">Sin visitas agendadas</p>
-                  <button className="mt-2 text-xs text-primary-600" onClick={() => setEventDialog(true)}>Agendar primera visita →</button>
+                  <p className="text-sm">Sin eventos agendados</p>
+                  <button className="mt-2 text-xs text-primary-600" onClick={() => setEventDialog(true)}>Agendar primer evento →</button>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -1321,7 +1321,7 @@ export function LeadDetail() {
               {/* Dialog editar visita */}
               <Dialog open={!!editingEvent} onOpenChange={() => setEditingEvent(null)}>
                 <DialogContent className="sm:max-w-md">
-                  <DialogHeader><DialogTitle>Editar visita</DialogTitle></DialogHeader>
+                  <DialogHeader><DialogTitle>Editar evento</DialogTitle></DialogHeader>
                   <div className="space-y-4">
                     <div className="space-y-1.5">
                       <Label>Título</Label>
@@ -1372,7 +1372,7 @@ export function LeadDetail() {
               {/* Dialog agendar visita */}
               <Dialog open={eventDialog} onOpenChange={setEventDialog}>
                 <DialogContent className="sm:max-w-md">
-                  <DialogHeader><DialogTitle>Agendar visita</DialogTitle></DialogHeader>
+                  <DialogHeader><DialogTitle>Agendar evento</DialogTitle></DialogHeader>
                   <div className="space-y-4">
                     <div className="space-y-1.5">
                       <Label>Título <span className="text-gray-400 font-normal text-xs">(opcional)</span></Label>
