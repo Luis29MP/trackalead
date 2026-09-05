@@ -30,7 +30,6 @@ export function Integrations() {
   const { organization, user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [savingWa, setSavingWa] = useState(false)
-  const [savingGc, setSavingGc] = useState(false)
   const [copied, setCopied] = useState(false)
   const [testNumber, setTestNumber] = useState('')
   const [testing, setTesting] = useState(false)
@@ -49,11 +48,10 @@ export function Integrations() {
   const [evoSaved, setEvoSaved] = useState({ api_key: false })
 
   // Google Calendar
-  const [gcal, setGcal] = useState<{ calendar_id: string; notify_jose: boolean; recipients: Recipient[] }>({ calendar_id: '', notify_jose: false, recipients: [] })
-  const [newRecipient, setNewRecipient] = useState<Recipient>({ name: '', phone: '' })
   // Conexión OAuth de Google Calendar (a nivel de organización)
   const [gcalConn, setGcalConn] = useState<{ connected: boolean; email: string; calendar_id: string }>({ connected: false, email: '', calendar_id: 'primary' })
   const [gcalBusy, setGcalBusy] = useState(false)
+  const [gcalCalendars, setGcalCalendars] = useState<{ id: string; summary: string; primary: boolean }[]>([])
 
   useEffect(() => { load() }, [organization?.id])
 
@@ -88,14 +86,21 @@ export function Integrations() {
     toast.success('Google Calendar desconectado')
     load()
   }
-  async function saveGcalId() {
+  async function saveGcalCalendar(id: string) {
+    setGcalConn(c => ({ ...c, calendar_id: id }))
     if (!organization) return
-    setGcalBusy(true)
-    const { error } = await supabase.functions.invoke('gcal-oauth', { body: { action: 'set_calendar', org_id: organization.id, calendar_id: gcalConn.calendar_id } })
-    setGcalBusy(false)
-    if (error) { toast.error('No se pudo guardar el calendario'); return }
-    toast.success('Calendario destino guardado')
+    const { error } = await supabase.functions.invoke('gcal-oauth', { body: { action: 'set_calendar', org_id: organization.id, calendar_id: id } })
+    if (error) toast.error('No se pudo guardar el calendario')
+    else toast.success('Calendario guardado')
   }
+
+  // Carga la lista de calendarios de la cuenta conectada (para el desplegable)
+  useEffect(() => {
+    if (!organization || !gcalConn.connected) return
+    supabase.functions.invoke('gcal-oauth', { body: { action: 'list_calendars', org_id: organization.id } })
+      .then(({ data }) => { if (Array.isArray(data?.calendars)) setGcalCalendars(data.calendars) })
+      .catch(() => { /* silencioso */ })
+  }, [organization?.id, gcalConn.connected])
 
   async function load() {
     if (!organization?.id) return
@@ -124,11 +129,6 @@ export function Integrations() {
     setEvoSaved({ api_key: !!e.api_key })
 
     const g = byProvider.google_calendar?.config ?? {}
-    setGcal({
-      calendar_id: String(g.calendar_id ?? ''),
-      notify_jose: !!g.notify_jose,
-      recipients: Array.isArray(g.recipients) ? (g.recipients as Recipient[]) : [],
-    })
     setGcalConn({
       connected: !!g.refresh_token_enc,
       email: String(g.connected_email ?? ''),
@@ -173,13 +173,6 @@ export function Integrations() {
     }
   }
 
-  function saveGoogleCalendar() {
-    saveIntegration('google_calendar', {
-      notify_jose: gcal.notify_jose,
-      recipients: gcal.recipients,
-    }, gcalConn.connected || gcal.notify_jose || gcal.recipients.length > 0, setSavingGc)
-  }
-
   // Envía un WhatsApp real con la config GUARDADA → confirma que las credenciales funcionan
   async function testSend() {
     if (!organization) return
@@ -202,16 +195,6 @@ export function Integrations() {
   function copyCallback() {
     navigator.clipboard.writeText(CALLBACK_URL)
     setCopied(true); setTimeout(() => setCopied(false), 1500)
-  }
-
-  function addRecipient() {
-    const name = newRecipient.name.trim(); const phone = newRecipient.phone.trim()
-    if (!name || !phone) { toast.error('Nombre y número requeridos'); return }
-    setGcal(g => ({ ...g, recipients: [...g.recipients, { name, phone }] }))
-    setNewRecipient({ name: '', phone: '' })
-  }
-  function removeRecipient(i: number) {
-    setGcal(g => ({ ...g, recipients: g.recipients.filter((_, idx) => idx !== i) }))
   }
 
   if (loading) {
@@ -325,12 +308,20 @@ export function Integrations() {
                 <Button variant="outline" size="sm" onClick={disconnectGoogle} disabled={gcalBusy}>Desconectar</Button>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Calendario destino de las visitas</Label>
-                <div className="flex gap-2">
-                  <Input value={gcalConn.calendar_id} onChange={e => setGcalConn(c => ({ ...c, calendar_id: e.target.value }))} placeholder="primary o xxx@group.calendar.google.com" className="flex-1" />
-                  <Button variant="outline" onClick={saveGcalId} disabled={gcalBusy}>Guardar</Button>
-                </div>
-                <p className="text-[11px] text-gray-500">Pon el <strong>ID del calendario «Visitas»</strong> (en Google Calendar → ajustes de ese calendario → «Integrar calendario» → <em>ID del calendario</em>). Deja <code>primary</code> para el calendario principal de la cuenta.</p>
+                <Label className="text-xs">Calendario donde se guardan las visitas</Label>
+                {gcalCalendars.length > 0 ? (
+                  <Select value={gcalConn.calendar_id} onValueChange={saveGcalCalendar}>
+                    <SelectTrigger><SelectValue placeholder="Elige un calendario" /></SelectTrigger>
+                    <SelectContent>
+                      {gcalCalendars.map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.summary}{c.primary ? ' (principal)' : ''}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <p className="text-[11px] text-gray-500">Cargando calendarios…</p>
+                )}
+                <p className="text-[11px] text-gray-500">Elige el calendario (p. ej. «Visitas y llamadas»). Compártelo en Google con quien quiera ver las visitas y sus alarmas.</p>
               </div>
             </div>
           ) : (
@@ -338,45 +329,9 @@ export function Integrations() {
               <Button variant="outline" onClick={connectGoogle} disabled={gcalBusy} className="gap-2">
                 <Calendar className="h-4 w-4" />{gcalBusy ? 'Conectando…' : 'Conectar con Google Calendar'}
               </Button>
-              <p className="text-[11px] text-gray-400 mt-1">Las visitas creadas en TrackALead se añadirán a este calendario con su alarma. Al conectar verás un aviso de «app no verificada» → <strong>Avanzado → Continuar</strong>.</p>
+              <p className="text-[11px] text-gray-400 mt-1">Al conectar, <strong>elige la cuenta correcta</strong> (la que quieras usar como central) y acepta. Verás un aviso de «app no verificada» → <strong>Avanzado → Continuar</strong>.</p>
             </div>
           )}
-
-          <div className="flex items-center justify-between border border-gray-100 rounded-lg p-3">
-            <div>
-              <p className="text-sm font-medium text-gray-800">Notificar a José por WhatsApp al asignarle una tarea</p>
-              <p className="text-[11px] text-gray-400">Aviso instantáneo cuando se le asigna un lead o partida.</p>
-            </div>
-            <Switch checked={gcal.notify_jose} onCheckedChange={v => setGcal(g => ({ ...g, notify_jose: v }))} />
-          </div>
-
-          {/* Destinatarios de notificación */}
-          <div className="space-y-2">
-            <Label className="text-xs">Destinatarios de notificaciones por WhatsApp</Label>
-            <p className="text-[11px] text-gray-400">Reciben el resumen diario de tareas y los nuevos leads.</p>
-            {gcal.recipients.length > 0 && (
-              <div className="space-y-1.5">
-                {gcal.recipients.map((r, i) => (
-                  <div key={i} className="flex items-center gap-2 border border-gray-100 rounded-lg px-3 py-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-800 truncate">{r.name}</p>
-                      <p className="text-xs text-gray-400">{r.phone}</p>
-                    </div>
-                    <button onClick={() => removeRecipient(i)} className="text-red-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Input placeholder="Nombre" value={newRecipient.name} onChange={e => setNewRecipient(r => ({ ...r, name: e.target.value }))} className="sm:w-44" />
-              <Input placeholder="Número (con prefijo)" value={newRecipient.phone} onChange={e => setNewRecipient(r => ({ ...r, phone: e.target.value }))} className="flex-1" />
-              <Button variant="outline" onClick={addRecipient} className="gap-1.5"><Plus className="h-4 w-4" />Añadir</Button>
-            </div>
-          </div>
-
-          <Button onClick={saveGoogleCalendar} disabled={savingGc} className="gap-1.5">
-            <ShieldCheck className="h-4 w-4" />{savingGc ? 'Guardando…' : 'Guardar'}
-          </Button>
         </CardContent>
       </Card>
 

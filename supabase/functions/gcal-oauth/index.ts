@@ -22,11 +22,26 @@ async function deriveAes(p: string) {
   return crypto.subtle.importKey('raw', h, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
 }
 function toB64(b: Uint8Array) { let s = ''; for (const x of b) s += String.fromCharCode(x); return btoa(s) }
+function fromB64(b64: string) { const bin = atob(b64); const o = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) o[i] = bin.charCodeAt(i); return o }
 async function encryptSecret(plain: string, pass: string) {
   const k = await deriveAes(pass)
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k, enc.encode(plain)))
   const c = new Uint8Array(iv.length + ct.length); c.set(iv, 0); c.set(ct, iv.length); return toB64(c)
+}
+async function decryptSecret(payload: string, pass: string) {
+  const k = await deriveAes(pass)
+  const d = fromB64(payload)
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: d.slice(0, 12) }, k, d.slice(12))
+  return new TextDecoder().decode(pt)
+}
+async function getAccessToken(refresh: string, id: string, secret: string): Promise<string | null> {
+  const r = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: id, client_secret: secret, refresh_token: refresh, grant_type: 'refresh_token' }),
+  })
+  const t = await r.json()
+  return r.ok ? t.access_token : null
 }
 
 // state firmado (HMAC) para no poder falsificar la organización en el callback
@@ -51,7 +66,7 @@ async function verifyState(state: string, kek: string): Promise<string | null> {
 
 const REDIRECT_URI = 'https://qplznujisnpwyhrjjuyp.supabase.co/functions/v1/gcal-oauth'
 const APP_RETURN = 'https://panel.trackalead.app/settings?gcal='
-const SCOPE = 'https://www.googleapis.com/auth/calendar.events'
+const SCOPE = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly'
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
@@ -107,7 +122,7 @@ serve(async (req) => {
     if (body.action === 'start') {
       const consent = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
         client_id: CLIENT_ID, redirect_uri: REDIRECT_URI, response_type: 'code',
-        scope: SCOPE, access_type: 'offline', prompt: 'consent', state: await makeState(orgId, KEK),
+        scope: SCOPE, access_type: 'offline', prompt: 'select_account consent', state: await makeState(orgId, KEK),
       }).toString()
       return json({ url: consent })
     }
@@ -116,6 +131,18 @@ serve(async (req) => {
       const { data } = await admin.from('org_integrations').select('config').eq('org_id', orgId).eq('provider', 'google_calendar').maybeSingle()
       const cfg = (data?.config ?? {}) as Record<string, unknown>
       return json({ connected: !!cfg.refresh_token_enc, email: cfg.connected_email || '', calendar_id: cfg.calendar_id || 'primary' })
+    }
+
+    if (body.action === 'list_calendars') {
+      const { data } = await admin.from('org_integrations').select('config').eq('org_id', orgId).eq('provider', 'google_calendar').maybeSingle()
+      const cfg = (data?.config ?? {}) as Record<string, string>
+      if (!cfg.refresh_token_enc) return json({ calendars: [] })
+      const at = await getAccessToken(await decryptSecret(cfg.refresh_token_enc, KEK), CLIENT_ID, CLIENT_SECRET)
+      if (!at) return json({ calendars: [], error: 'reauth' })
+      const r = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=writer', { headers: { Authorization: `Bearer ${at}` } })
+      const d = await r.json()
+      const calendars = (d.items ?? []).map((c: { id: string; summary: string; primary?: boolean }) => ({ id: c.id, summary: c.summary, primary: !!c.primary }))
+      return json({ calendars })
     }
 
     if (body.action === 'set_calendar') {
