@@ -6,6 +6,7 @@ import { supabase } from './supabase'
 export interface SyncEvent {
   id: string
   org_id: string
+  lead_id?: string | null
   title: string
   description?: string | null
   location?: string | null
@@ -21,6 +22,7 @@ export async function syncCalendarEvent(op: 'upsert' | 'delete', ev: SyncEvent):
       body: {
         org_id: ev.org_id,
         op,
+        lead_id: ev.lead_id ?? null,
         google_event_id: ev.google_event_id ?? null,
         event: {
           title: ev.title,

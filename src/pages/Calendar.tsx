@@ -212,7 +212,7 @@ export function Calendar() {
       }).select().single()
       if (created) {
         syncCalendarEvent('upsert', {
-          id: created.id, org_id: organization!.id, title: form.title.trim(),
+          id: created.id, org_id: organization!.id, lead_id: selectedLead?.id ?? null, title: form.title.trim(),
           description: form.description || null, location: null,
           start_at: created.start_at, end_at: created.end_at, notify_before_minutes: 30, google_event_id: null,
         })
@@ -289,7 +289,7 @@ export function Calendar() {
         end_at: newEnd,
       }).eq('id', detailEvent.id)
       syncCalendarEvent('upsert', {
-        id: detailEvent.id, org_id: organization!.id, title: editForm.title.trim(),
+        id: detailEvent.id, org_id: organization!.id, lead_id: editLead?.id ?? null, title: editForm.title.trim(),
         description: editForm.description || null, location: null,
         start_at: newStart, end_at: newEnd,
         notify_before_minutes: detailEvent.notify_before_minutes ?? 30,

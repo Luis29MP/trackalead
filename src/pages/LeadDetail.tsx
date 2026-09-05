@@ -793,7 +793,7 @@ export function LeadDetail() {
         description: editEventForm.description || null,
       }).eq('id', editingEvent.id)
       syncCalendarEvent('upsert', {
-        id: editingEvent.id, org_id: organization!.id, title: upTitle,
+        id: editingEvent.id, org_id: organization!.id, lead_id: lead?.id ?? null, title: upTitle,
         description: editEventForm.description || null, location: lead?.address || lead?.zone || null,
         start_at: upStart, end_at: upEnd,
         notify_before_minutes: editingEvent.notify_before_minutes ?? 30,
@@ -928,7 +928,7 @@ export function LeadDetail() {
       }).select().single()
       if (createdEv) {
         syncCalendarEvent('upsert', {
-          id: createdEv.id, org_id: organization!.id, title: evTitle,
+          id: createdEv.id, org_id: organization!.id, lead_id: lead.id, title: evTitle,
           description: eventForm.description || null, location: lead.address || lead.zone || null,
           start_at: evStart, end_at: evEnd, notify_before_minutes: 30, google_event_id: null,
         })

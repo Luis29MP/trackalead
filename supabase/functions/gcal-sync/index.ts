@@ -44,7 +44,7 @@ serve(async (req) => {
     const { data: { user } } = await admin.auth.getUser(authToken)
     if (!user) return json({ error: 'No autorizado' }, 401)
 
-    const { org_id, op, event, google_event_id } = await req.json()
+    const { org_id, op, event, google_event_id, lead_id } = await req.json()
     if (!org_id || !op) return json({ error: 'org_id y op requeridos' }, 400)
     const { data: member } = await admin.from('org_members').select('id').eq('org_id', org_id).eq('user_id', user.id).maybeSingle()
     if (!member) return json({ error: 'No perteneces a esta organización' }, 403)
@@ -78,10 +78,30 @@ serve(async (req) => {
     // upsert
     if (!event?.start_at || !event?.end_at) return json({ error: 'Faltan fechas del evento' }, 400)
     const minutes = Number.isFinite(event.notify_before_minutes) ? Math.max(0, Math.min(40320, event.notify_before_minutes)) : 30
+
+    // Enriquecer con los datos del lead (a quién llamar/visitar, teléfono, trabajo)
+    let summary = event.title || 'Visita'
+    let location = event.location || undefined
+    const lines: string[] = []
+    if (lead_id) {
+      const { data: lead } = await admin.from('leads').select('name, phone, zone, address, concept').eq('id', lead_id).maybeSingle()
+      if (lead) {
+        if (lead.name) summary = `${event.title || 'Visita'} · ${lead.name}`
+        if (lead.name) lines.push(`👤 Cliente: ${lead.name}`)
+        if (lead.phone) lines.push(`📞 Teléfono: ${lead.phone}`)
+        const loc = lead.address || lead.zone
+        if (loc) { lines.push(`📍 ${loc}`); location = location || loc }
+        if (lead.concept) lines.push(`🔧 ${lead.concept}`)
+        lines.push('', `🔗 Ficha del lead: https://panel.trackalead.app/leads/${lead_id}`)
+      }
+    }
+    if (event.description) lines.unshift(event.description, '')
+    const description = lines.length ? lines.join('\n') : (event.description || undefined)
+
     const payload = {
-      summary: event.title || 'Visita',
-      description: event.description || undefined,
-      location: event.location || undefined,
+      summary,
+      description,
+      location,
       start: { dateTime: new Date(event.start_at).toISOString(), timeZone: TZ },
       end: { dateTime: new Date(event.end_at).toISOString(), timeZone: TZ },
       reminders: { useDefault: false, overrides: [{ method: 'popup', minutes }] },
