@@ -51,8 +51,51 @@ export function Integrations() {
   // Google Calendar
   const [gcal, setGcal] = useState<{ calendar_id: string; notify_jose: boolean; recipients: Recipient[] }>({ calendar_id: '', notify_jose: false, recipients: [] })
   const [newRecipient, setNewRecipient] = useState<Recipient>({ name: '', phone: '' })
+  // Conexión OAuth de Google Calendar (a nivel de organización)
+  const [gcalConn, setGcalConn] = useState<{ connected: boolean; email: string; calendar_id: string }>({ connected: false, email: '', calendar_id: 'primary' })
+  const [gcalBusy, setGcalBusy] = useState(false)
 
   useEffect(() => { load() }, [organization?.id])
+
+  // Vuelta del OAuth de Google (?gcal=connected|error)
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get('gcal')
+    if (!p) return
+    if (p === 'connected') toast.success('Google Calendar conectado')
+    else if (p === 'error') toast.error('No se pudo conectar con Google. Inténtalo de nuevo.')
+    window.history.replaceState({}, '', window.location.pathname)
+  }, [])
+
+  async function connectGoogle() {
+    if (!organization) return
+    setGcalBusy(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('gcal-oauth', { body: { action: 'start', org_id: organization.id } })
+      if (error || !data?.url) throw new Error(error?.message || 'No se pudo iniciar la conexión')
+      window.location.href = data.url as string
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al conectar')
+      setGcalBusy(false)
+    }
+  }
+  async function disconnectGoogle() {
+    if (!organization) return
+    if (!window.confirm('¿Desconectar Google Calendar? Las visitas dejarán de sincronizarse.')) return
+    setGcalBusy(true)
+    const { error } = await supabase.functions.invoke('gcal-oauth', { body: { action: 'disconnect', org_id: organization.id } })
+    setGcalBusy(false)
+    if (error) { toast.error('No se pudo desconectar'); return }
+    toast.success('Google Calendar desconectado')
+    load()
+  }
+  async function saveGcalId() {
+    if (!organization) return
+    setGcalBusy(true)
+    const { error } = await supabase.functions.invoke('gcal-oauth', { body: { action: 'set_calendar', org_id: organization.id, calendar_id: gcalConn.calendar_id } })
+    setGcalBusy(false)
+    if (error) { toast.error('No se pudo guardar el calendario'); return }
+    toast.success('Calendario destino guardado')
+  }
 
   async function load() {
     if (!organization?.id) return
@@ -85,6 +128,11 @@ export function Integrations() {
       calendar_id: String(g.calendar_id ?? ''),
       notify_jose: !!g.notify_jose,
       recipients: Array.isArray(g.recipients) ? (g.recipients as Recipient[]) : [],
+    })
+    setGcalConn({
+      connected: !!g.refresh_token_enc,
+      email: String(g.connected_email ?? ''),
+      calendar_id: String(g.calendar_id ?? 'primary') || 'primary',
     })
 
     if (byProvider.evolution_api && !byProvider.meta_whatsapp) setWhProvider('evolution_api')
@@ -127,10 +175,9 @@ export function Integrations() {
 
   function saveGoogleCalendar() {
     saveIntegration('google_calendar', {
-      calendar_id: gcal.calendar_id.trim(),
       notify_jose: gcal.notify_jose,
       recipients: gcal.recipients,
-    }, !!gcal.calendar_id.trim() || gcal.recipients.length > 0, setSavingGc)
+    }, gcalConn.connected || gcal.notify_jose || gcal.recipients.length > 0, setSavingGc)
   }
 
   // Envía un WhatsApp real con la config GUARDADA → confirma que las credenciales funcionan
@@ -269,14 +316,31 @@ export function Integrations() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <Button variant="outline" disabled className="gap-2">
-              <Calendar className="h-4 w-4" />Conectar con Google
-            </Button>
-            <p className="text-[11px] text-gray-400 mt-1">OAuth2 próximamente. Por ahora, configura el calendario compartido y las notificaciones por WhatsApp.</p>
-          </div>
-
-          <Field label="ID del calendario compartido" value={gcal.calendar_id} onChange={v => setGcal(g => ({ ...g, calendar_id: v }))} placeholder="abc123@group.calendar.google.com" />
+          {gcalConn.connected ? (
+            <div className="border border-green-200 bg-green-50 rounded-lg p-3 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm text-green-700 flex items-center gap-1.5">
+                  <Check className="h-4 w-4" />Conectado{gcalConn.email ? ` · ${gcalConn.email}` : ''}
+                </p>
+                <Button variant="outline" size="sm" onClick={disconnectGoogle} disabled={gcalBusy}>Desconectar</Button>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Calendario destino de las visitas</Label>
+                <div className="flex gap-2">
+                  <Input value={gcalConn.calendar_id} onChange={e => setGcalConn(c => ({ ...c, calendar_id: e.target.value }))} placeholder="primary o xxx@group.calendar.google.com" className="flex-1" />
+                  <Button variant="outline" onClick={saveGcalId} disabled={gcalBusy}>Guardar</Button>
+                </div>
+                <p className="text-[11px] text-gray-500">Pon el <strong>ID del calendario «Visitas»</strong> (en Google Calendar → ajustes de ese calendario → «Integrar calendario» → <em>ID del calendario</em>). Deja <code>primary</code> para el calendario principal de la cuenta.</p>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <Button variant="outline" onClick={connectGoogle} disabled={gcalBusy} className="gap-2">
+                <Calendar className="h-4 w-4" />{gcalBusy ? 'Conectando…' : 'Conectar con Google Calendar'}
+              </Button>
+              <p className="text-[11px] text-gray-400 mt-1">Las visitas creadas en TrackALead se añadirán a este calendario con su alarma. Al conectar verás un aviso de «app no verificada» → <strong>Avanzado → Continuar</strong>.</p>
+            </div>
+          )}
 
           <div className="flex items-center justify-between border border-gray-100 rounded-lg p-3">
             <div>

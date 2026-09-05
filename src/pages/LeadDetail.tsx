@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
+import { syncCalendarEvent } from '@/lib/gcalSync'
 import { useAuth } from '@/context/AuthContext'
 import { useLead } from '@/hooks/useLeads'
 import { Button } from '@/components/ui/button'
@@ -781,13 +782,23 @@ export function LeadDetail() {
     if (!editingEvent || !editEventForm.start_at) return
     setSavingEditEv(true)
     try {
+      const upTitle = editEventForm.title || editEventForm.type
+      const upStart = toUTCIso(editEventForm.start_at)
+      const upEnd = toUTCIso(editEventForm.end_at || editEventForm.start_at)
       await supabase.from('calendar_events').update({
-        title: editEventForm.title || editEventForm.type,
+        title: upTitle,
         type: editEventForm.type,
-        start_at: toUTCIso(editEventForm.start_at),
-        end_at: toUTCIso(editEventForm.end_at || editEventForm.start_at),
+        start_at: upStart,
+        end_at: upEnd,
         description: editEventForm.description || null,
       }).eq('id', editingEvent.id)
+      syncCalendarEvent('upsert', {
+        id: editingEvent.id, org_id: organization!.id, title: upTitle,
+        description: editEventForm.description || null, location: lead?.address || lead?.zone || null,
+        start_at: upStart, end_at: upEnd,
+        notify_before_minutes: editingEvent.notify_before_minutes ?? 30,
+        google_event_id: editingEvent.google_event_id ?? null,
+      })
       setEditingEvent(null)
       loadRelated()
       toast.success('Visita actualizada')
@@ -796,7 +807,14 @@ export function LeadDetail() {
   }
 
   async function handleDeleteLeadEvent(id: string) {
+    const ev = leadEvents.find(e => e.id === id)
     await supabase.from('calendar_events').delete().eq('id', id)
+    if (ev?.google_event_id) {
+      syncCalendarEvent('delete', {
+        id, org_id: organization!.id, title: ev.title, start_at: ev.start_at, end_at: ev.end_at,
+        google_event_id: ev.google_event_id,
+      })
+    }
     setConfirmDeleteEvId(null)
     loadRelated()
     toast.success('Visita eliminada')
@@ -894,17 +912,27 @@ export function LeadDetail() {
         reunion:            'Reunión',
         otro:               'Otro',
       }
-      await supabase.from('calendar_events').insert({
+      const evTitle = eventForm.title.trim() || typeLabels[eventForm.type]
+      const evStart = toUTCIso(eventForm.start_at)
+      const evEnd = toUTCIso(eventForm.end_at || eventForm.start_at)
+      const { data: createdEv } = await supabase.from('calendar_events').insert({
         org_id: organization!.id,
         lead_id: lead.id,
         user_id: user!.id,
-        title: eventForm.title.trim() || typeLabels[eventForm.type],
+        title: evTitle,
         type: eventForm.type,
         description: eventForm.description || null,
-        start_at: toUTCIso(eventForm.start_at),
-        end_at: toUTCIso(eventForm.end_at || eventForm.start_at),
+        start_at: evStart,
+        end_at: evEnd,
         notify_before_minutes: 30,
-      })
+      }).select().single()
+      if (createdEv) {
+        syncCalendarEvent('upsert', {
+          id: createdEv.id, org_id: organization!.id, title: evTitle,
+          description: eventForm.description || null, location: lead.address || lead.zone || null,
+          start_at: evStart, end_at: evEnd, notify_before_minutes: 30, google_event_id: null,
+        })
+      }
       setEventDialog(false)
       setEventForm({ type: 'visita_presencial', title: '', start_at: '', end_at: '', description: '' })
       loadRelated()

@@ -282,6 +282,7 @@ export interface CalendarEvent {
   start_at: string
   end_at: string
   notify_before_minutes: number
+  google_event_id?: string | null
   lead?: Lead
 }
 

@@ -55,7 +55,9 @@ serve(async (req) => {
     const { data: existing } = await admin.from('org_integrations').select('config').eq('org_id', org_id).eq('provider', provider).maybeSingle()
     const prev = (existing?.config ?? {}) as Record<string, unknown>
     const incoming = (config ?? {}) as Record<string, unknown>
-    const out: Record<string, unknown> = { ...incoming }
+    // Fusiona con lo previo para no borrar campos que no vengan en esta llamada
+    // (p. ej. el refresh_token de Google Calendar guardado por gcal-oauth).
+    const out: Record<string, unknown> = { ...prev, ...incoming }
     for (const f of SECRET_FIELDS[provider]) {
       const val = incoming[f]
       if (val && String(val).trim()) out[f] = await encryptSecret(String(val), kek)

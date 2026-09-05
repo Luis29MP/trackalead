@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
+import { syncCalendarEvent } from '@/lib/gcalSync'
 import { useAuth } from '@/context/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -198,7 +199,7 @@ export function Calendar() {
     if (!form.title.trim() || !form.start_at) return
     setSaving(true)
     try {
-      await supabase.from('calendar_events').insert({
+      const { data: created } = await supabase.from('calendar_events').insert({
         org_id: organization!.id,
         user_id: user!.id,
         title: form.title.trim(),
@@ -208,7 +209,14 @@ export function Calendar() {
         start_at: toUTCIso(form.start_at),
         end_at: toUTCIso(form.end_at || form.start_at),
         notify_before_minutes: 30,
-      })
+      }).select().single()
+      if (created) {
+        syncCalendarEvent('upsert', {
+          id: created.id, org_id: organization!.id, title: form.title.trim(),
+          description: form.description || null, location: null,
+          start_at: created.start_at, end_at: created.end_at, notify_before_minutes: 30, google_event_id: null,
+        })
+      }
       toast.success('Evento creado')
       setShowDialog(false)
       setForm(EMPTY_FORM)
@@ -219,7 +227,14 @@ export function Calendar() {
   }
 
   async function handleDeleteEvent(id: string) {
+    const ev = events.find(e => e.id === id)
     await supabase.from('calendar_events').delete().eq('id', id)
+    if (ev?.google_event_id) {
+      syncCalendarEvent('delete', {
+        id, org_id: organization!.id, title: ev.title, start_at: ev.start_at, end_at: ev.end_at,
+        google_event_id: ev.google_event_id,
+      })
+    }
     setDetailEvent(null)
     loadEvents()
     toast.success('Evento eliminado')
@@ -263,14 +278,23 @@ export function Calendar() {
     if (!detailEvent || !editForm.title.trim() || !editForm.start_at) return
     setSavingEdit(true)
     try {
+      const newStart = toUTCIso(editForm.start_at)
+      const newEnd = toUTCIso(editForm.end_at || editForm.start_at)
       await supabase.from('calendar_events').update({
         title: editForm.title.trim(),
         type: editForm.type,
         description: editForm.description || null,
         lead_id: editLead?.id ?? null,
-        start_at: toUTCIso(editForm.start_at),
-        end_at: toUTCIso(editForm.end_at || editForm.start_at),
+        start_at: newStart,
+        end_at: newEnd,
       }).eq('id', detailEvent.id)
+      syncCalendarEvent('upsert', {
+        id: detailEvent.id, org_id: organization!.id, title: editForm.title.trim(),
+        description: editForm.description || null, location: null,
+        start_at: newStart, end_at: newEnd,
+        notify_before_minutes: detailEvent.notify_before_minutes ?? 30,
+        google_event_id: detailEvent.google_event_id ?? null,
+      })
       toast.success('Evento actualizado')
       setDetailEvent(null)
       setDetailMode('view')
