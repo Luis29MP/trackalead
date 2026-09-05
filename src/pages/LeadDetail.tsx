@@ -5,7 +5,7 @@ import {
   MessageSquare, Activity, User, DollarSign, CheckCircle, Clock,
   Trash2, Wrench, Building2, MessageCircle, ChevronRight, Calendar,
   AlertCircle, Share2, Link, Copy, Check, Trash,
-  CalendarPlus, Home, PhoneCall, RefreshCw, ClipboardList, FileText, Download, Sparkles, Layers, Eye, Receipt, Send, Plus,
+  CalendarPlus, Home, PhoneCall, RefreshCw, ClipboardList, FileText, Download, Sparkles, Layers, Eye, Receipt, Send, Plus, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
@@ -351,6 +351,7 @@ export function LeadDetail() {
   const [columns,      setColumns]      = useState<BoardColumn[]>([])
   const [newComment,   setNewComment]   = useState('')
   const [uploading,    setUploading]    = useState(false)
+  const [lightbox,     setLightbox]     = useState<string | null>(null)
   const [leadEvents,    setLeadEvents]    = useState<CalendarEvent[]>([])
   const [eventDialog,   setEventDialog]   = useState(false)
   const [savingEvent,   setSavingEvent]   = useState(false)
@@ -1460,39 +1461,91 @@ export function LeadDetail() {
                 <Upload className="h-4 w-4" />{uploading ? 'Subiendo…' : 'Subir archivo'}
               </Button>
               {files.length === 0 && <p className="text-sm text-gray-400">Sin archivos adjuntos</p>}
-              {files.map(f => {
-                const isBudget = f.name.startsWith('[PRESUPUESTO]')
-                const displayName = isBudget ? f.name.replace('[PRESUPUESTO] ', '') : f.name
+
+              {/* Imágenes como miniaturas (clic → visor dentro de la app) */}
+              {(() => {
+                const isImage = (f: LeadFile) => (f.type?.startsWith('image/') ?? false) || /\.(jpe?g|png|gif|webp|bmp|heic|avif|svg)$/i.test(f.name)
+                const imageFiles = files.filter(isImage)
+                const otherFiles = files.filter(f => !isImage(f))
                 return (
-                  <div
-                    key={f.id}
-                    className={`flex items-center gap-3 p-3 rounded-lg ${isBudget ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'}`}
-                  >
-                    <Paperclip className={`h-4 w-4 shrink-0 ${isBudget ? 'text-amber-500' : 'text-gray-400'}`} />
-                    <div className="flex-1 min-w-0">
-                      {isBudget && (
-                        <span className="inline-block text-[10px] font-bold bg-amber-500 text-white rounded px-1.5 py-0.5 mr-1.5 mb-0.5">
-                          PRESUPUESTO
-                        </span>
-                      )}
-                      <a href={f.url} target="_blank" rel="noreferrer"
-                        className={`text-sm hover:underline truncate block ${isBudget ? 'text-amber-700' : 'text-primary-600'}`}>
-                        {displayName}
-                      </a>
-                    </div>
-                    <span className="text-xs text-gray-400 shrink-0">{(f.size / 1024).toFixed(0)} KB</span>
-                    <button
-                      onClick={async () => { await supabase.from('lead_files').delete().eq('id', f.id); loadRelated() }}
-                      className="text-red-400 hover:text-red-600 shrink-0"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+                  <>
+                    {imageFiles.length > 0 && (
+                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                        {imageFiles.map(f => (
+                          <div key={f.id} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                            <button type="button" onClick={() => setLightbox(f.url)} className="w-full h-full" title={f.name}>
+                              <img src={f.url} alt={f.name} loading="lazy" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                            </button>
+                            <button
+                              onClick={async () => { await supabase.from('lead_files').delete().eq('id', f.id); loadRelated() }}
+                              className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {otherFiles.map(f => {
+                      const isBudget = f.name.startsWith('[PRESUPUESTO]')
+                      const displayName = isBudget ? f.name.replace('[PRESUPUESTO] ', '') : f.name
+                      return (
+                        <div
+                          key={f.id}
+                          className={`flex items-center gap-3 p-3 rounded-lg ${isBudget ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'}`}
+                        >
+                          <Paperclip className={`h-4 w-4 shrink-0 ${isBudget ? 'text-amber-500' : 'text-gray-400'}`} />
+                          <div className="flex-1 min-w-0">
+                            {isBudget && (
+                              <span className="inline-block text-[10px] font-bold bg-amber-500 text-white rounded px-1.5 py-0.5 mr-1.5 mb-0.5">
+                                PRESUPUESTO
+                              </span>
+                            )}
+                            <a href={f.url} target="_blank" rel="noreferrer"
+                              className={`text-sm hover:underline truncate block ${isBudget ? 'text-amber-700' : 'text-primary-600'}`}>
+                              {displayName}
+                            </a>
+                          </div>
+                          <span className="text-xs text-gray-400 shrink-0">{(f.size / 1024).toFixed(0)} KB</span>
+                          <button
+                            onClick={async () => { await supabase.from('lead_files').delete().eq('id', f.id); loadRelated() }}
+                            className="text-red-400 hover:text-red-600 shrink-0"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </>
                 )
-              })}
+              })()}
             </TabsContent>
           </Tabs>
         </div>
+
+        {/* Visor de imágenes dentro de la app (lightbox) */}
+        {lightbox && (
+          <div
+            className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4 cursor-zoom-out"
+            onClick={() => setLightbox(null)}
+          >
+            <button
+              onClick={() => setLightbox(null)}
+              className="absolute top-4 right-4 text-white/80 hover:text-white bg-white/10 hover:bg-white/20 rounded-full p-2"
+              title="Cerrar"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <img
+              src={lightbox}
+              alt="Imagen del lead"
+              className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            />
+          </div>
+        )}
 
         {/* ── Sidebar acciones rápidas (1/3): en móvil va PRIMERO ─────────── */}
         <div className="space-y-4 order-1 lg:order-2">
