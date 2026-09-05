@@ -100,15 +100,22 @@ export function Team() {
   async function handleSaveEditMember() {
     if (!editMember) return
     setSaving(true)
-    await supabase.from('org_members').update({ role: editMember.role, permissions: editMember.permissions }).eq('id', editMember.id)
-    toast.success('Miembro actualizado')
+    const { error } = await supabase.rpc('update_org_member', {
+      p_member_id: editMember.id,
+      p_role: editMember.role,
+      p_permissions: editMember.permissions,
+    })
     setSaving(false)
+    if (error) { toast.error(error.message || 'No se pudo actualizar el colaborador'); return }
+    toast.success('Miembro actualizado')
     setEditMember(null)
     loadAll()
   }
 
   async function handleRemoveMember(memberId: string) {
-    await supabase.from('org_members').delete().eq('id', memberId)
+    if (!window.confirm('¿Eliminar a este colaborador de la organización? Perderá el acceso.')) return
+    const { error } = await supabase.rpc('remove_org_member', { p_member_id: memberId })
+    if (error) { toast.error(error.message || 'No se pudo eliminar el colaborador'); return }
     toast.success('Miembro eliminado')
     loadAll()
   }

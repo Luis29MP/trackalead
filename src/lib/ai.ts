@@ -367,3 +367,93 @@ export async function analyzeLeadMessage(text: string): Promise<LeadAnalysis> {
     note: String(obj.note ?? '').trim(),
   }
 }
+
+// ── Alta de profesional desde uno de sus presupuestos/facturas ──────────────────
+export interface ExtractedProfessional {
+  name: string; company_name: string; cif: string; phone: string
+  email: string; address: string; specialty: string; rates: ProRate[]
+}
+
+const PRO_EXTRACT_SYSTEM = `Eres un asistente de un CRM de servicios del hogar en España (reformas, pintura, electricidad, fontanería, carpintería…).
+Te doy un PRESUPUESTO o FACTURA emitido por un profesional/instalador (autónomo o empresa). Debes extraer:
+1) Los DATOS DEL PROFESIONAL QUE EMITE el documento (NO los del cliente/destinatario).
+2) Su lista de TARIFAS: cada partida de trabajo o material con su PRECIO UNITARIO.
+
+Reglas:
+- El emisor es quien presupuesta/factura: suele ir arriba, con logo, "Presupuesto de…", razón social y NIF/CIF. IGNORA por completo los datos del cliente que recibe el presupuesto.
+- Tarifas: para cada línea, work_type = concepto del trabajo con terminología del gremio y SIN cantidades ni medidas concretas; rec_price = precio UNITARIO (no el total de la línea); min_price = igual que rec_price si no hay un mínimo aparte; unit = una de: ud, hora, m², ml (deduce la más lógica).
+- IGNORA líneas de subtotal, total, IVA, base imponible, descuentos y formas de pago: solo partidas con precio unitario.
+- Deduce specialty (gremio) a partir del contenido: "Electricista", "Fontanero", "Pintor", "Reformas integrales"…
+- Si un dato no aparece, usa cadena vacía; si no hay tarifas claras, devuelve lista vacía. No inventes.
+
+Devuelve EXCLUSIVAMENTE un objeto JSON válido (sin texto ni markdown) con esta forma exacta:
+{
+  "name": "nombre de la persona de contacto o del autónomo, o ''",
+  "company_name": "razón social / nombre comercial o ''",
+  "cif": "NIF o CIF o ''",
+  "phone": "teléfono o ''",
+  "email": "email o ''",
+  "address": "dirección fiscal o ''",
+  "specialty": "gremio/especialidad deducida o ''",
+  "rates": [ { "work_type": "concepto", "min_price": 0, "rec_price": 0, "unit": "ud" } ]
+}`
+
+// Analiza el presupuesto/factura de un profesional (texto y/o imágenes) y extrae
+// sus datos y tarifas para prerrellenar el alta. Reutiliza el ai-proxy del usuario.
+export async function extractProfessionalFromDocument(input: { text?: string; images?: AiImage[] }): Promise<ExtractedProfessional> {
+  const { supabase } = await import('./supabase')
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('No hay usuario para la IA')
+
+  const text = (input.text ?? '').trim()
+  const images = input.images ?? []
+  if (!text && !images.length) throw new Error('No se pudo leer contenido del documento')
+
+  const prompt = text
+    ? `Documento del profesional (presupuesto o factura):\n\n${text.slice(0, 40000)}`
+    : 'Analiza las imágenes adjuntas: son el presupuesto/factura de un profesional.'
+
+  const { data, error } = await supabase.functions.invoke('ai-proxy', {
+    body: { user_id: user.id, prompt, system: PRO_EXTRACT_SYSTEM, max_tokens: 4000, web_search: false, images },
+  })
+  if (error) {
+    let detail = error.message
+    try {
+      const ctx = (error as { context?: Response }).context
+      if (ctx && typeof ctx.json === 'function') {
+        const b = await ctx.json()
+        if (Array.isArray(b?.details) && b.details.length) detail = b.details.join(' | ')
+        else if (b?.error) detail = b.error
+      }
+    } catch { /* sin cuerpo */ }
+    throw new Error(`Error de la IA: ${detail}`)
+  }
+  if (data?.error) throw new Error(data.error)
+
+  const obj = extractJson(data?.text ?? '') as Record<string, unknown> | null
+  if (!obj || typeof obj !== 'object') throw new Error('La IA no devolvió un JSON válido')
+
+  const ratesRaw = Array.isArray(obj.rates) ? obj.rates : []
+  const rates: ProRate[] = ratesRaw.map((r) => {
+    const o = (r ?? {}) as Record<string, unknown>
+    const rec = Number(o.rec_price ?? o.price ?? o.rec ?? 0) || 0
+    const min = Number(o.min_price ?? o.min ?? 0) || rec
+    return {
+      work_type: String(o.work_type ?? o.concept ?? '').trim(),
+      min_price: min || rec,
+      rec_price: rec || min,
+      unit: String(o.unit ?? 'ud').trim() || 'ud',
+    }
+  }).filter(r => r.work_type && (r.rec_price || r.min_price))
+
+  return {
+    name: String(obj.name ?? '').trim(),
+    company_name: String(obj.company_name ?? '').trim(),
+    cif: String(obj.cif ?? '').trim(),
+    phone: String(obj.phone ?? '').trim(),
+    email: String(obj.email ?? '').trim(),
+    address: String(obj.address ?? '').trim(),
+    specialty: String(obj.specialty ?? '').trim(),
+    rates,
+  }
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, HardHat, Phone, Mail, Pencil, Trash2, Smartphone, Copy, Check, ExternalLink, Upload, FileText, Eye, ChevronRight, MapPin, Wrench } from 'lucide-react'
+import { Plus, HardHat, Phone, Mail, Pencil, Trash2, Smartphone, Copy, Check, ExternalLink, Upload, FileText, Eye, ChevronRight, MapPin, Wrench, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -27,6 +27,29 @@ interface ProForm {
 const EMPTY: ProForm = {
   name: '', phone: '', email: '', specialty: '', is_active: true, app_access: false, rates: [],
   company_name: '', address: '', cif: '', logo_url: '',
+}
+
+// Redimensiona una imagen a máx. 1500px y devuelve base64 JPEG (para la visión de la IA)
+function imageToAiPart(file: File): Promise<{ mime: string; data: string } | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      const max = 1500
+      const scale = Math.min(1, max / Math.max(img.width, img.height))
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { URL.revokeObjectURL(url); resolve(null); return }
+      ctx.drawImage(img, 0, 0, w, h)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.75)
+      URL.revokeObjectURL(url)
+      resolve({ mime: 'image/jpeg', data: dataUrl.split(',')[1] })
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null) }
+    img.src = url
+  })
 }
 
 // Redimensiona el logo a máx. 300px y lo pasa a data URL PNG (para el PDF)
@@ -59,6 +82,7 @@ export function Professionals() {
   const [dialog, setDialog]               = useState(false)
   const [editing, setEditing]             = useState<Professional | null>(null)
   const [saving, setSaving]               = useState(false)
+  const [importing, setImporting]         = useState(false)
   const [form, setForm]                   = useState<ProForm>(EMPTY)
   const [magicLink, setMagicLink]         = useState('')
   const [copied, setCopied]               = useState(false)
@@ -178,6 +202,57 @@ export function Professionals() {
     setCopied(true)
     toast.success('Enlace copiado')
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  // ── Alta rápida desde un presupuesto del profesional (IA) ────────────────────
+  async function handleImportBudget(file: File) {
+    setImporting(true)
+    const tid = toast.loading('Analizando el presupuesto con IA…')
+    try {
+      const name = file.name.toLowerCase()
+      let text = ''
+      let images: { mime: string; data: string }[] = []
+
+      if (file.type.startsWith('image/')) {
+        const img = await imageToAiPart(file)
+        if (img) images = [img]
+      } else {
+        const { extractKnowledgeText, pdfToImages } = await import('@/lib/extractText')
+        text = await extractKnowledgeText(file)
+        // PDF escaneado (sin capa de texto) → páginas a imagen para la visión de la IA
+        if ((file.type === 'application/pdf' || name.endsWith('.pdf')) && text.trim().length < 100) {
+          images = await pdfToImages(file, 8)
+        }
+      }
+      if (!text.trim() && !images.length) { toast.error('No se pudo leer el documento', { id: tid }); return }
+
+      const { extractProfessionalFromDocument } = await import('@/lib/ai')
+      const ex = await extractProfessionalFromDocument({ text, images })
+
+      // Rellena solo lo vacío (no pisa lo que el usuario ya escribió); las tarifas se añaden
+      setForm(f => ({
+        ...f,
+        name:         f.name.trim()         || ex.name || ex.company_name,
+        specialty:    f.specialty.trim()    || ex.specialty,
+        phone:        f.phone.trim()        || ex.phone,
+        email:        f.email.trim()        || ex.email,
+        company_name: f.company_name.trim() || ex.company_name,
+        cif:          f.cif.trim()          || ex.cif,
+        address:      f.address.trim()      || ex.address,
+        rates:        [...f.rates, ...ex.rates],
+      }))
+
+      const bits: string[] = []
+      const gotData = ex.name || ex.company_name || ex.phone || ex.email || ex.cif
+      if (gotData) bits.push('datos')
+      if (ex.rates.length) bits.push(`${ex.rates.length} tarifa${ex.rates.length !== 1 ? 's' : ''}`)
+      if (!bits.length) toast.error('No encontré datos ni tarifas en el documento', { id: tid })
+      else toast.success(`Extraído: ${bits.join(' y ')}. Revísalo antes de guardar.`, { id: tid })
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo analizar el documento', { id: tid })
+    } finally {
+      setImporting(false)
+    }
   }
 
   // ── Tarifas ────────────────────────────────────────────────────────────────
@@ -411,6 +486,21 @@ export function Professionals() {
             </div>
           ) : (
             <div className="space-y-4 min-w-0">
+              {/* Alta rápida: extraer datos y tarifas de un presupuesto del profesional */}
+              <label className={`flex items-center gap-3 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/60 px-4 py-3 transition-colors ${importing ? 'opacity-60 pointer-events-none' : 'cursor-pointer hover:border-indigo-400 hover:bg-indigo-50'}`}>
+                <input type="file" accept=".pdf,.xlsx,.xls,.csv,.docx,image/*" className="hidden" disabled={importing}
+                  onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handleImportBudget(f) }} />
+                <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+                  {importing
+                    ? <div className="animate-spin h-4 w-4 border-2 border-indigo-500 border-t-transparent rounded-full" />
+                    : <Sparkles className="h-5 w-5 text-indigo-600" />}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-indigo-800">{importing ? 'Analizando con IA…' : 'Rellenar desde un presupuesto (IA)'}</p>
+                  <p className="text-xs text-indigo-500">Sube un presupuesto o factura suya (PDF, Excel, Word o foto) y extraigo sus datos y tarifas.</p>
+                </div>
+              </label>
+
               <Tabs defaultValue="datos" className="min-w-0">
                 <TabsList className="mb-3">
                   <TabsTrigger value="datos">Datos</TabsTrigger>

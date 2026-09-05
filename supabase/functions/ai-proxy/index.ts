@@ -97,10 +97,14 @@ async function callGemini(key: string, model: string, prompt: string, system: st
   // flash / flash-lite sí permiten desactivarlo (0) para que no trunque el JSON.
   const thinkingOnly = /pro/i.test(model)
   const generationConfig: Record<string, unknown> = {
-    maxOutputTokens: Math.max(maxTokens, thinkingOnly ? 8000 : 4000),
+    // Techo alto: un presupuesto con varias opciones y muchas líneas puede ser largo.
+    // En modelos "thinking" (pro) el razonamiento consume parte de este presupuesto,
+    // por eso dejamos MUCHO más margen para que quepa el JSON final.
+    maxOutputTokens: Math.max(maxTokens, thinkingOnly ? 24000 : 8000),
     temperature: 0.4,
-    // pro → presupuesto dinámico (-1); flash → desactivado (0)
-    thinkingConfig: { thinkingBudget: thinkingOnly ? -1 : 0 },
+    // pro → razonamiento ACOTADO (antes -1 ilimitado se comía todo el presupuesto de
+    // salida y devolvía respuesta vacía = "límite de tokens"); flash → desactivado (0).
+    thinkingConfig: { thinkingBudget: thinkingOnly ? 8000 : 0 },
   }
   const parts: unknown[] = [{ text: prompt }]
   for (const img of images) parts.push({ inlineData: { mimeType: img.mime, data: img.data } })
@@ -125,9 +129,15 @@ async function callGemini(key: string, model: string, prompt: string, system: st
   if (!res.ok) throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 160)}`)
   const data = await res.json()
   // Unir TODAS las partes de texto del candidato (grounding puede devolver varias)
-  const outParts = data?.candidates?.[0]?.content?.parts ?? []
+  const cand = data?.candidates?.[0]
+  const outParts = cand?.content?.parts ?? []
   const text = outParts.map((p: { text?: string }) => p.text ?? '').join('').trim()
-  if (!text) throw new Error('gemini: respuesta vacía o sin texto (posible límite de tokens)')
+  if (!text) {
+    // Motivo real para diagnosticar de un vistazo: MAX_TOKENS (subir max_tokens o
+    // reducir adjuntos), SAFETY (contenido bloqueado), RECITATION, etc.
+    const reason = cand?.finishReason || data?.promptFeedback?.blockReason || 'desconocido'
+    throw new Error(`gemini: respuesta sin texto (finishReason=${reason}). Si es MAX_TOKENS, reduce los adjuntos o sube max_tokens; si es SAFETY/RECITATION, revisa el contenido enviado.`)
+  }
   return text
 }
 
