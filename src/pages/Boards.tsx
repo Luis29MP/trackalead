@@ -74,15 +74,42 @@ export function Boards() {
 
   const [deleteTarget, setDeleteTarget] = useState<Board | null>(null)
 
-  // Importar de Trello: elegir tablero destino y luego importar
+  // Importar de Trello: elegir tablero destino (existente o nuevo) y luego importar
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickMode, setPickMode] = useState<'existing' | 'new'>('existing')
   const [pickBoardId, setPickBoardId] = useState('')
+  const [newBoardName, setNewBoardName] = useState('')
+  const [startingImport, setStartingImport] = useState(false)
   const [importTarget, setImportTarget] = useState<{ id: string; cols: number } | null>(null)
+
+  function openImportPicker() {
+    setPickMode(boards.length ? 'existing' : 'new')
+    setPickBoardId(boards[0]?.id ?? '')
+    setNewBoardName('')
+    setPickerOpen(true)
+  }
+
   async function startImport() {
-    if (!pickBoardId) { toast.error('Elige un tablero'); return }
-    const { count } = await supabase.from('board_columns').select('*', { count: 'exact', head: true }).eq('board_id', pickBoardId)
-    setImportTarget({ id: pickBoardId, cols: count ?? 0 })
-    setPickerOpen(false)
+    setStartingImport(true)
+    try {
+      if (pickMode === 'new') {
+        const name = newBoardName.trim() || 'Tablero de Trello'
+        const color = BOARD_COLORS[Math.floor(Math.random() * BOARD_COLORS.length)]
+        // Tablero sin columnas: las listas de Trello se convierten en sus columnas
+        const board = await createBoard({ name, color }, [])
+        setImportTarget({ id: board.id, cols: 0 })
+        setPickerOpen(false)
+        return
+      }
+      if (!pickBoardId) { toast.error('Elige un tablero'); return }
+      const { count } = await supabase.from('board_columns').select('*', { count: 'exact', head: true }).eq('board_id', pickBoardId)
+      setImportTarget({ id: pickBoardId, cols: count ?? 0 })
+      setPickerOpen(false)
+    } catch {
+      toast.error('No se pudo preparar la importación')
+    } finally {
+      setStartingImport(false)
+    }
   }
 
   if (loading) {
@@ -101,11 +128,9 @@ export function Boards() {
           <p className="text-gray-500 text-sm mt-1">Gestiona los tableros de captación de leads</p>
         </div>
         <div className="flex items-center gap-2">
-        {boards.length > 0 && (
-          <Button variant="outline" className="gap-1.5" onClick={() => { setPickBoardId(boards[0]?.id ?? ''); setPickerOpen(true) }}>
+          <Button variant="outline" className="gap-1.5" onClick={openImportPicker}>
             <Download className="h-4 w-4" />Importar de Trello
           </Button>
-        )}
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button>
@@ -244,19 +269,55 @@ export function Boards() {
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Download className="h-5 w-5 text-primary-600" />Importar de Trello</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">¿A qué tablero importar las tarjetas?</Label>
-              <Select value={pickBoardId} onValueChange={setPickBoardId}>
-                <SelectTrigger><SelectValue placeholder="Elige un tablero" /></SelectTrigger>
-                <SelectContent>
-                  {boards.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-gray-400">Las listas y tarjetas se añadirán a ese tablero, sin tocar lo que ya tenga.</p>
+            {/* Modo: tablero existente o crear uno nuevo */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setPickMode('existing')}
+                disabled={boards.length === 0}
+                className={`text-left rounded-lg border p-2.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  pickMode === 'existing' ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <p className="text-xs font-semibold text-gray-800">Tablero existente</p>
+                <p className="text-[11px] text-gray-400 leading-tight">Añadir a uno que ya tienes</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPickMode('new')}
+                className={`text-left rounded-lg border p-2.5 transition-colors ${
+                  pickMode === 'new' ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <p className="text-xs font-semibold text-gray-800">Crear nuevo</p>
+                <p className="text-[11px] text-gray-400 leading-tight">Tablero nuevo para el import</p>
+              </button>
             </div>
+
+            {pickMode === 'existing' ? (
+              <div className="space-y-1.5">
+                <Label className="text-xs">¿A qué tablero importar las tarjetas?</Label>
+                <Select value={pickBoardId} onValueChange={setPickBoardId}>
+                  <SelectTrigger><SelectValue placeholder="Elige un tablero" /></SelectTrigger>
+                  <SelectContent>
+                    {boards.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-gray-400">Las listas y tarjetas se añadirán a ese tablero, sin tocar lo que ya tenga.</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Nombre del tablero nuevo</Label>
+                <Input value={newBoardName} onChange={e => setNewBoardName(e.target.value)} placeholder="Ej: Leads importados de Trello" />
+                <p className="text-[11px] text-gray-400">Se crea un tablero vacío y las <strong>listas de Trello</strong> pasan a ser sus columnas.</p>
+              </div>
+            )}
+
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setPickerOpen(false)}>Cancelar</Button>
-              <Button onClick={startImport} disabled={!pickBoardId}>Continuar</Button>
+              <Button onClick={startImport} disabled={startingImport || (pickMode === 'existing' && !pickBoardId)}>
+                {startingImport ? 'Preparando…' : 'Continuar'}
+              </Button>
             </div>
           </div>
         </DialogContent>

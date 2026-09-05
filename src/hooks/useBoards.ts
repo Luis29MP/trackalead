@@ -99,10 +99,14 @@ export function useBoards() {
 
     if (error) throw error
 
-    const cols = columns && columns.length > 0 ? columns : STANDARD_COLUMNS
-    await supabase.from('board_columns').insert(
-      cols.map((col, i) => ({ name: col.name, color: col.color, position: i, board_id: data.id }))
-    )
+    // Si se pasa un array (aunque sea vacío) se respeta; solo se usan las estándar
+    // cuando NO se pasa nada. Un array vacío → tablero sin columnas (p. ej. import de Trello).
+    const cols = columns === undefined ? STANDARD_COLUMNS : columns
+    if (cols.length > 0) {
+      await supabase.from('board_columns').insert(
+        cols.map((col, i) => ({ name: col.name, color: col.color, position: i, board_id: data.id }))
+      )
+    }
 
     await loadBoards()
     return data
