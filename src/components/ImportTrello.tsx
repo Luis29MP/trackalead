@@ -1,5 +1,5 @@
 import { useState, type ElementType } from 'react'
-import { Upload, FileJson, CheckCircle2, AlertCircle, Loader2, Columns3, CreditCard, ListChecks, MessageSquare } from 'lucide-react'
+import { Upload, FileJson, CheckCircle2, AlertCircle, Loader2, Columns3, CreditCard, ListChecks, MessageSquare, Paperclip } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 // ── Estructura del export JSON de Trello (solo lo que usamos) ───────────────────
 interface TrelloLabel { id: string; name: string; color: string }
 interface TrelloList { id: string; name: string; closed: boolean; pos: number }
-interface TrelloAttachment { name?: string; url?: string; isUpload?: boolean }
+interface TrelloAttachment { id?: string; name?: string; url?: string; isUpload?: boolean }
 interface TrelloCard {
   id: string; name: string; desc: string; idList: string
   pos?: number               // orden vertical de la tarjeta dentro de su lista
@@ -74,17 +74,69 @@ function parseTrello(raw: unknown): Parsed {
   return { boardName: data.name ?? 'Tablero de Trello', lists, cards, checklistsByCard, checklistTotal, commentsByCard, commentTotal }
 }
 
+// ¿Es un adjunto SUBIDO a Trello? Esos requieren auth (key+token) para descargarse,
+// así que se traen vía Edge Function. Los enlaces externos NO cuentan aquí.
+function needsTrelloAuth(att: TrelloAttachment): boolean {
+  if (!att.url) return false
+  return att.isUpload === true || /trello\.com/i.test(att.url)
+}
+
+// Tareas de descarga de adjuntos (archivos subidos a Trello) para un lead ya creado.
+interface AttachmentTask { attachmentUrl: string; attachmentName: string; attachmentId?: string; leadId: string }
+function cardAttachmentTasks(card: TrelloCard, leadId: string): AttachmentTask[] {
+  const tasks: AttachmentTask[] = []
+  for (const att of card.attachments ?? []) {
+    if (!needsTrelloAuth(att) || !att.url) continue
+    tasks.push({ attachmentUrl: att.url, attachmentName: att.name || 'archivo', attachmentId: att.id, leadId })
+  }
+  return tasks
+}
+
 // Filas de comentario a crear para una tarjeta: comentarios de Trello + adjuntos externos.
-// Adjuntos: solo URLs externas (no subidas a Trello, que requieren auth).
+// Adjuntos: solo URLs externas (no subidas a Trello; las subidas se descargan como archivos).
 function cardCommentRows(card: TrelloCard, commentsByCard: Record<string, TrelloComment[]>): { content: string; created_at: string | null }[] {
   const rows: { content: string; created_at: string | null }[] = []
   for (const c of commentsByCard[card.id] ?? []) rows.push({ content: c.text, created_at: c.date })
   for (const att of card.attachments ?? []) {
-    if (att.isUpload) continue
-    if (!att.url || /trello\.com/i.test(att.url)) continue
+    if (needsTrelloAuth(att)) continue          // los subidos a Trello van como archivo, no como comentario
+    if (!att.url) continue
     rows.push({ content: `Archivo adjunto: ${att.name || att.url} - ${att.url}`, created_at: null })
   }
   return rows
+}
+
+// Descarga adjuntos de Trello vía Edge Function, de 5 en 5, con progreso y sin abortar
+// todo si uno falla. Si el token de Trello caduca, corta y avisa claramente.
+async function importTrelloAttachments(
+  tasks: AttachmentTask[],
+  onProgress: (done: number, total: number) => void,
+): Promise<{ imported: number; failed: { name: string; error: string }[]; expired: boolean }> {
+  const { supabase } = await import('@/lib/supabase')
+  const failed: { name: string; error: string }[] = []
+  let imported = 0, done = 0, expired = false
+  const CONC = 5
+  for (let i = 0; i < tasks.length && !expired; i += CONC) {
+    const batch = tasks.slice(i, i + CONC)
+    const results = await Promise.all(batch.map(async (t) => {
+      try {
+        const { data, error } = await supabase.functions.invoke('import-trello-attachment', { body: t })
+        if (error) return { t, ok: false, error: error.message }
+        return { t, ...(data as { ok?: boolean; expired?: boolean; error?: string }) }
+      } catch (e) {
+        return { t, ok: false, error: e instanceof Error ? e.message : 'error' }
+      }
+    }))
+    for (const r of results) {
+      done++
+      if (r.ok) imported++
+      else {
+        failed.push({ name: r.t.attachmentName, error: r.error || 'error desconocido' })
+        if ((r as { expired?: boolean }).expired) expired = true
+      }
+    }
+    onProgress(done, tasks.length)
+  }
+  return { imported, failed, expired }
 }
 
 // Extrae el valor de un campo etiquetado de la descripción (p. ej. "Teléfono: ...")
@@ -151,8 +203,13 @@ function formatChecklist(cl: TrelloChecklist): string {
   return items ? `${header}\n${items}` : header
 }
 
-interface Progress { phase: 'columns' | 'leads'; done: number; total: number }
-interface Result { columns: number; leads: number; comments: number; errors: number }
+interface Progress { phase: 'columns' | 'leads' | 'attachments'; done: number; total: number }
+interface Result {
+  columns: number; leads: number; comments: number; errors: number
+  attachments?: number
+  attachmentsFailed?: { name: string; error: string }[]
+  attachmentsExpired?: boolean
+}
 
 export function ImportTrello({
   open, onOpenChange, boardId, existingColumnsCount, onImported,
@@ -231,6 +288,7 @@ export function ImportTrello({
     setProgress({ phase: 'leads', done: 0, total: cards.length })
     let leadsCreated = 0
     let commentsCreated = 0
+    const attachmentTasks: AttachmentTask[] = []
     for (let i = 0; i < cards.length; i++) {
       const card = cards[i]
       const title = card.name?.trim() || '(sin título)'
@@ -255,6 +313,8 @@ export function ImportTrello({
         errors++
       } else {
         leadsCreated++
+        // Adjuntos subidos a Trello (requieren auth) → se descargan después
+        attachmentTasks.push(...cardAttachmentTasks(card, lead.id))
         // Checklists → comentarios
         for (const cl of parsed.checklistsByCard[card.id] ?? []) {
           const { error: cErr } = await supabase.from('lead_comments').insert({
@@ -274,11 +334,25 @@ export function ImportTrello({
       setProgress({ phase: 'leads', done: i + 1, total: cards.length })
     }
 
+    // 3) Adjuntos subidos a Trello → descargar (vía Edge Function) y guardar como archivos
+    let attImported = 0
+    let attFailed: { name: string; error: string }[] = []
+    let attExpired = false
+    if (attachmentTasks.length) {
+      setProgress({ phase: 'attachments', done: 0, total: attachmentTasks.length })
+      const r = await importTrelloAttachments(attachmentTasks, (done, total) => setProgress({ phase: 'attachments', done, total }))
+      attImported = r.imported; attFailed = r.failed; attExpired = r.expired
+    }
+
     setImporting(false)
     setProgress(null)
-    setResult({ columns: Object.keys(colMap).length, leads: leadsCreated, comments: commentsCreated, errors })
+    setResult({
+      columns: Object.keys(colMap).length, leads: leadsCreated, comments: commentsCreated, errors,
+      attachments: attImported, attachmentsFailed: attFailed, attachmentsExpired: attExpired,
+    })
     await onImported()
-    toast.success('Importación de Trello completada')
+    if (attExpired) toast.error('Token de Trello caducado: algunos adjuntos no se descargaron. Regenera el token y reintenta.')
+    else toast.success('Importación de Trello completada')
   }
 
   // Para los leads YA importados (cruce por teléfono): reordena según Trello y
@@ -345,11 +419,27 @@ export function ImportTrello({
       setProgress({ phase: 'leads', done: ++done, total })
     }
 
+    // Adjuntos subidos a Trello de los leads que han hecho match → descargar y guardar
+    const attachmentTasks: AttachmentTask[] = []
+    for (const { leadId, card } of matched) attachmentTasks.push(...cardAttachmentTasks(card, leadId))
+    let attImported = 0
+    let attFailed: { name: string; error: string }[] = []
+    let attExpired = false
+    if (attachmentTasks.length) {
+      setProgress({ phase: 'attachments', done: 0, total: attachmentTasks.length })
+      const r = await importTrelloAttachments(attachmentTasks, (done, total) => setProgress({ phase: 'attachments', done, total }))
+      attImported = r.imported; attFailed = r.failed; attExpired = r.expired
+    }
+
     setImporting(false)
     setProgress(null)
-    setResult({ columns: 0, leads: posDone, comments: commentsDone, errors: notFound })
+    setResult({
+      columns: 0, leads: posDone, comments: commentsDone, errors: notFound,
+      attachments: attImported, attachmentsFailed: attFailed, attachmentsExpired: attExpired,
+    })
     await onImported()
-    toast.success(`${posDone} reordenados · ${commentsDone} comentarios nuevos${notFound ? ` · ${notFound} sin coincidencia` : ''}`)
+    if (attExpired) toast.error('Token de Trello caducado: algunos adjuntos no se descargaron. Regenera el token y reintenta.')
+    else toast.success(`${posDone} reordenados · ${commentsDone} comentarios · ${attImported} adjuntos${notFound ? ` · ${notFound} sin coincidencia` : ''}`)
   }
 
   const pct = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0
@@ -380,6 +470,30 @@ export function ImportTrello({
                 <AlertCircle className="h-3.5 w-3.5" />{result.errors} elemento(s) no se pudieron importar
               </p>
             )}
+            {typeof result.attachments === 'number' && (result.attachments > 0 || (result.attachmentsFailed?.length ?? 0) > 0) && (
+              <p className="text-xs text-gray-600 flex items-center gap-1.5 justify-center">
+                <Paperclip className="h-3.5 w-3.5 text-primary-600" />
+                {result.attachments} adjunto(s) importado(s)
+                {(result.attachmentsFailed?.length ?? 0) > 0 && (
+                  <span className="text-amber-600"> · {result.attachmentsFailed!.length} fallido(s)</span>
+                )}
+              </p>
+            )}
+            {result.attachmentsExpired && (
+              <p className="text-xs text-red-600 flex items-center gap-1.5 justify-center text-center">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />Token de Trello caducado: regénéralo y reintenta para traer los adjuntos que faltan.
+              </p>
+            )}
+            {(result.attachmentsFailed?.length ?? 0) > 0 && (
+              <details className="text-xs text-gray-500">
+                <summary className="cursor-pointer hover:text-gray-700">Ver adjuntos fallidos ({result.attachmentsFailed!.length})</summary>
+                <ul className="mt-1.5 max-h-32 overflow-y-auto space-y-0.5 bg-slate-50 rounded-lg p-2">
+                  {result.attachmentsFailed!.map((f, i) => (
+                    <li key={i} className="truncate">• <span className="text-gray-700">{f.name}</span> — {f.error}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
             <Button className="w-full" onClick={() => handleClose(false)}>Listo</Button>
           </div>
         ) : importing ? (
@@ -387,7 +501,9 @@ export function ImportTrello({
           <div className="space-y-3 py-2">
             <p className="text-sm text-gray-600 flex items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
-              {progress?.phase === 'columns' ? 'Creando columnas…' : 'Importando leads…'}
+              {progress?.phase === 'columns' ? 'Creando columnas…'
+                : progress?.phase === 'attachments' ? 'Importando adjuntos…'
+                : 'Importando leads…'}
               {progress && <span className="text-gray-400">({progress.done}/{progress.total})</span>}
             </p>
             <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -407,8 +523,8 @@ export function ImportTrello({
             </div>
             <p className="text-xs text-gray-500 bg-slate-50 rounded-lg p-3 leading-relaxed">
               Se crearán <strong>{parsed.lists.length}</strong> columnas nuevas y <strong>{parsed.cards.length}</strong> leads.
-              Descripción, etiquetas y vencimiento van en las notas; los <strong>comentarios</strong> de Trello (con su fecha),
-              los checklists y los adjuntos externos se añaden como comentarios del lead.
+              Descripción, etiquetas y vencimiento van en las notas; los <strong>comentarios</strong> de Trello (con su fecha)
+              y los checklists se añaden como comentarios. Las <strong>fotos y PDFs subidos a Trello se descargan</strong> como archivos del lead.
               <span className="text-gray-400"> No se modifica nada de lo ya existente.</span>
             </p>
             <div className="flex gap-2">
