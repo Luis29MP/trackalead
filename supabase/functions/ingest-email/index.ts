@@ -41,24 +41,30 @@ function spanishPhone(text: string): string {
   return digits.length === 9 ? digits : ''
 }
 
-const AI_TRIAGE_SYSTEM = `Eres un filtro de leads de un CRM de servicios del hogar en España (reformas, pintura, electricidad, fontanería, carpintería, carpintería metálica, placas solares).
-Recibes el contenido de un email de un formulario de contacto de una web. Decide si es un LEAD (persona interesada en un servicio) o BASURA.
+const AI_TRIAGE_SYSTEM = `Eres un filtro de leads de un CRM de servicios del hogar en León (España): reformas, pintura, electricidad, fontanería, carpintería, carpintería metálica, placas solares. Los clientes pueden ser PARTICULARES o EMPRESAS de la zona.
+Recibes un email de un formulario de contacto de una web. Decide si es un LEAD o BASURA.
 
-CRITERIO (muy importante, léelo bien):
-- ANTE LA DUDA, es LEAD (is_lead=true). Es mucho peor descartar un cliente real que colar un spam: el usuario borra un spam en un segundo, pero un lead perdido es dinero perdido.
-- Un formulario con un TELÉFONO español válido (9 dígitos, empieza 6/7/8/9) o un email de persona, y un nombre, ES UN LEAD aunque el mensaje sea muy corto, genérico o esté VACÍO. Mucha gente solo deja su contacto para que le llamen: eso es un lead válido.
-- NO descartes por cómo sea la dirección de email; fíjate en el CONTENIDO del mensaje.
-- Marca is_lead=false SOLO si es CLARAMENTE una de estas: venta de servicios o publicidad (SEO, posicionamiento web, marketing, backlinks, diseño de webs, "mejora tu ranking"…), spam, estafa/phishing, una prueba que lo diga explícitamente, o texto sin ningún sentido.
+ES LEAD (is_lead=true):
+- Cualquier consulta real sobre uno de estos servicios, escrita en ESPAÑOL, tanto de un particular como de una EMPRESA.
+- Un formulario con teléfono español (9 dígitos, empieza por 6/7/8/9) o email de contacto y un nombre, AUNQUE el mensaje sea corto o esté VACÍO (mucha gente solo deja su contacto para que le llamen).
+- Ante una duda razonable, márcalo como LEAD.
+
+ES BASURA (is_lead=false), descártalo SOLO si es claramente:
+- Un mensaje que NO está escrito en español (inglés u otro idioma): nuestros clientes escriben en español, así que eso es spam.
+- Phishing o estafa: pagar una factura/deuda, cuenta o cuenta bancaria suspendida, verificar datos, paquetes retenidos, premios, herencias, criptomonedas.
+- Apuestas, casino, tragaperras.
+- Venta de servicios o publicidad: SEO, posicionamiento web, marketing, backlinks, diseño de webs.
+- Texto sin sentido o claramente automático.
 
 Devuelve EXCLUSIVAMENTE un objeto JSON válido (sin markdown) con esta forma:
 {
   "is_lead": true o false,
   "reason": "motivo breve de la decisión",
-  "name": "nombre de la persona o ''",
+  "name": "nombre de la persona o empresa, o ''",
   "phone": "teléfono o ''",
   "email": "email o ''",
   "zone": "ciudad o zona o ''",
-  "concept": "resumen corto del trabajo con terminología del gremio; si no hay detalle, deja '' o 'Contacto, pendiente de detallar'",
+  "concept": "resumen corto del trabajo con terminología del gremio; si no hay detalle, deja 'Contacto, pendiente de detallar'",
   "description": "resumen en 2-3 frases, nunca literal, o ''"
 }`
 
@@ -146,12 +152,13 @@ serve(async (req) => {
 
     // Decisión: la IA manda; si no hubo IA, vale la heurística (tiene contacto y texto)
     let isLead = ai ? ai.is_lead === true : true
-    // Red de seguridad: si hay teléfono español válido y la IA NO lo marcó como spam
-    // claro (sino, p. ej., "mensaje corto"), lo conservamos: mejor lead de más que perderlo.
-    if (!isLead && heurPhone) {
-      const r = String(ai?.reason ?? '').toLowerCase()
-      const clearlySpam = /(seo|posicion|marketing|backlink|publicidad|spam|estafa|phishing|prueba|test|dise[nñ]o web|ranking|venta de)/.test(r)
-      if (!clearlySpam) isLead = true
+    // Red de seguridad SOLO para el caso "sin mensaje / mensaje corto": si hay teléfono
+    // español y la IA lo descartó por falta de detalle (no por spam/idioma/phishing), lo
+    // conservamos. No rescata phishing, apuestas ni idioma extranjero.
+    if (!isLead && heurPhone && ai) {
+      const r = String(ai.reason ?? '').toLowerCase()
+      const shortReason = /(corto|breve|vac[ií]o|gen[eé]rico|poca informaci|sin mensaje|sin detalle|insuficiente|escueto|falta)/.test(r)
+      if (shortReason) isLead = true
     }
     if (!isLead) {
       await log({ org_id: route.org_id, board_id: route.board_id, route_key: route.key, status: 'discarded_ai', reason: String(ai?.reason ?? 'IA: no es lead'), from_addr: from, subject, raw_excerpt: excerpt })
