@@ -42,8 +42,14 @@ function spanishPhone(text: string): string {
 }
 
 const AI_TRIAGE_SYSTEM = `Eres un filtro de leads de un CRM de servicios del hogar en España (reformas, pintura, electricidad, fontanería, carpintería, carpintería metálica, placas solares).
-Te doy el contenido de un email recibido desde el formulario de contacto de una web. Decide si es un LEAD REAL (una persona pidiendo presupuesto o información sobre un trabajo) o BASURA (spam, publicidad, SEO, notificaciones automáticas, pruebas o texto incoherente).
-Un lead real normalmente tiene: nombre de persona, un teléfono español o email, y un texto coherente describiendo una necesidad.
+Recibes el contenido de un email de un formulario de contacto de una web. Decide si es un LEAD (persona interesada en un servicio) o BASURA.
+
+CRITERIO (muy importante, léelo bien):
+- ANTE LA DUDA, es LEAD (is_lead=true). Es mucho peor descartar un cliente real que colar un spam: el usuario borra un spam en un segundo, pero un lead perdido es dinero perdido.
+- Un formulario con un TELÉFONO español válido (9 dígitos, empieza 6/7/8/9) o un email de persona, y un nombre, ES UN LEAD aunque el mensaje sea muy corto, genérico o esté VACÍO. Mucha gente solo deja su contacto para que le llamen: eso es un lead válido.
+- NO descartes por cómo sea la dirección de email; fíjate en el CONTENIDO del mensaje.
+- Marca is_lead=false SOLO si es CLARAMENTE una de estas: venta de servicios o publicidad (SEO, posicionamiento web, marketing, backlinks, diseño de webs, "mejora tu ranking"…), spam, estafa/phishing, una prueba que lo diga explícitamente, o texto sin ningún sentido.
+
 Devuelve EXCLUSIVAMENTE un objeto JSON válido (sin markdown) con esta forma:
 {
   "is_lead": true o false,
@@ -52,7 +58,7 @@ Devuelve EXCLUSIVAMENTE un objeto JSON válido (sin markdown) con esta forma:
   "phone": "teléfono o ''",
   "email": "email o ''",
   "zone": "ciudad o zona o ''",
-  "concept": "resumen corto del trabajo con terminología del gremio, o ''",
+  "concept": "resumen corto del trabajo con terminología del gremio; si no hay detalle, deja '' o 'Contacto, pendiente de detallar'",
   "description": "resumen en 2-3 frases, nunca literal, o ''"
 }`
 
@@ -139,7 +145,14 @@ serve(async (req) => {
     }
 
     // Decisión: la IA manda; si no hubo IA, vale la heurística (tiene contacto y texto)
-    const isLead = ai ? ai.is_lead === true : true
+    let isLead = ai ? ai.is_lead === true : true
+    // Red de seguridad: si hay teléfono español válido y la IA NO lo marcó como spam
+    // claro (sino, p. ej., "mensaje corto"), lo conservamos: mejor lead de más que perderlo.
+    if (!isLead && heurPhone) {
+      const r = String(ai?.reason ?? '').toLowerCase()
+      const clearlySpam = /(seo|posicion|marketing|backlink|publicidad|spam|estafa|phishing|prueba|test|dise[nñ]o web|ranking|venta de)/.test(r)
+      if (!clearlySpam) isLead = true
+    }
     if (!isLead) {
       await log({ org_id: route.org_id, board_id: route.board_id, route_key: route.key, status: 'discarded_ai', reason: String(ai?.reason ?? 'IA: no es lead'), from_addr: from, subject, raw_excerpt: excerpt })
       return json({ ok: true, discarded: 'ai' })
