@@ -52,6 +52,9 @@ export function Integrations() {
   const [gcalConn, setGcalConn] = useState<{ connected: boolean; email: string; calendar_id: string }>({ connected: false, email: '', calendar_id: 'primary' })
   const [gcalBusy, setGcalBusy] = useState(false)
   const [gcalCalendars, setGcalCalendars] = useState<{ id: string; summary: string; primary: boolean }[]>([])
+  // Avisos por WhatsApp al entrar un lead
+  const [notifyPhones, setNotifyPhones] = useState<{ name: string; phone: string }[]>([])
+  const [newNotify, setNewNotify] = useState<{ name: string; phone: string }>({ name: '', phone: '' })
 
   useEffect(() => { load() }, [organization?.id])
 
@@ -102,6 +105,27 @@ export function Integrations() {
       .catch(() => { /* silencioso */ })
   }, [organization?.id, gcalConn.connected])
 
+  // Avisos por WhatsApp al entrar un lead (config sin secretos → upsert directo)
+  async function saveNotifyPhones(phones: { name: string; phone: string }[]) {
+    if (!organization) return
+    setNotifyPhones(phones)
+    const { error } = await supabase.from('org_integrations').upsert({
+      org_id: organization.id, provider: 'lead_notify',
+      config: { phones }, is_active: phones.length > 0, updated_at: new Date().toISOString(),
+    }, { onConflict: 'org_id,provider' })
+    if (error) toast.error('No se pudieron guardar los avisos')
+  }
+  function addNotifyPhone() {
+    const name = newNotify.name.trim(); const phone = newNotify.phone.trim()
+    if (!phone) { toast.error('Escribe un número (con prefijo, ej: 34612345678)'); return }
+    saveNotifyPhones([...notifyPhones, { name, phone }])
+    setNewNotify({ name: '', phone: '' })
+    toast.success('Aviso añadido')
+  }
+  function removeNotifyPhone(i: number) {
+    saveNotifyPhones(notifyPhones.filter((_, idx) => idx !== i))
+  }
+
   async function load() {
     if (!organization?.id) return
     setLoading(true)
@@ -127,6 +151,9 @@ export function Integrations() {
       api_key: '',
     })
     setEvoSaved({ api_key: !!e.api_key })
+
+    const notif = byProvider.lead_notify?.config ?? {}
+    setNotifyPhones(Array.isArray(notif.phones) ? (notif.phones as { name: string; phone: string }[]) : [])
 
     const g = byProvider.google_calendar?.config ?? {}
     setGcalConn({
@@ -332,6 +359,36 @@ export function Integrations() {
               <p className="text-[11px] text-gray-400 mt-1">Al conectar, <strong>elige la cuenta correcta</strong> (la que quieras usar como central) y acepta. Verás un aviso de «app no verificada» → <strong>Avanzado → Continuar</strong>.</p>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* ── Avisos de nuevos leads por WhatsApp ──────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2 text-emerald-600">
+            <MessageCircle className="h-4 w-4" />Avisos de nuevos leads por WhatsApp
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-[11px] text-gray-400">Cuando entre un lead nuevo (por email de formulario), se envía un WhatsApp a estos números. Requiere la integración de WhatsApp activa (arriba).</p>
+          {notifyPhones.length > 0 && (
+            <div className="space-y-1.5">
+              {notifyPhones.map((r, i) => (
+                <div key={i} className="flex items-center gap-2 border border-gray-100 rounded-lg px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-800 truncate">{r.name || 'Sin nombre'}</p>
+                    <p className="text-xs text-gray-400">{r.phone}</p>
+                  </div>
+                  <button onClick={() => removeNotifyPhone(i)} className="text-red-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Input placeholder="Nombre (ej: Jose)" value={newNotify.name} onChange={e => setNewNotify(r => ({ ...r, name: e.target.value }))} className="sm:w-44" />
+            <Input placeholder="Número con prefijo (ej: 34612345678)" value={newNotify.phone} onChange={e => setNewNotify(r => ({ ...r, phone: e.target.value }))} className="flex-1" />
+            <Button variant="outline" onClick={addNotifyPhone} className="gap-1.5"><Plus className="h-4 w-4" />Añadir</Button>
+          </div>
         </CardContent>
       </Card>
 

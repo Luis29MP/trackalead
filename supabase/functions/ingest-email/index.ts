@@ -101,9 +101,9 @@ serve(async (req) => {
     // 1) Ruta → tablero. Candidatos, por fiabilidad: alias +hash, +tag o parte local del
     //    destinatario (carpinteria@…, hash+carpinteria@…), y dominio del destinatario/remitente.
     const candidates = [mailboxHash, plusTag(toAddr), localPart(toAddr), domainOf(toAddr), domainOf(from)].filter(Boolean)
-    let route: { org_id: string; board_id: string; key: string } | null = null
+    let route: { org_id: string; board_id: string; key: string; label: string | null } | null = null
     if (candidates.length) {
-      const { data } = await admin.from('email_ingest_routes').select('org_id, board_id, key').in('key', candidates).limit(1).maybeSingle()
+      const { data } = await admin.from('email_ingest_routes').select('org_id, board_id, key, label').in('key', candidates).limit(1).maybeSingle()
       if (data) route = data
     }
     if (!route) {
@@ -181,6 +181,26 @@ serve(async (req) => {
     }
 
     await log({ org_id: route.org_id, board_id: route.board_id, route_key: route.key, status: 'created', from_addr: from, subject, raw_excerpt: excerpt, lead_id: lead.id })
+
+    // Aviso por WhatsApp a los responsables (no crítico: no bloquea la creación)
+    try {
+      const { data: notif } = await admin.from('org_integrations').select('config').eq('org_id', route.org_id).eq('provider', 'lead_notify').maybeSingle()
+      const phones = ((notif?.config as { phones?: { name?: string; phone?: string }[] })?.phones) ?? []
+      if (phones.length) {
+        const msg = `🔔 Nuevo lead${route.label ? ` (${route.label})` : ''}\n👤 ${name}` +
+          (phone ? `\n📞 ${phone}` : '') + (zone ? `\n📍 ${zone}` : '') + (concept ? `\n🔧 ${concept}` : '') +
+          `\n\nEntra en TrackALead para gestionarlo.`
+        for (const p of phones) {
+          if (!p.phone) continue
+          fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}` },
+            body: JSON.stringify({ org_id: route.org_id, to: p.phone, message: msg }),
+          }).catch(() => { /* aviso no crítico */ })
+        }
+      }
+    } catch { /* aviso no crítico */ }
+
     return json({ ok: true, created: true, lead_id: lead.id })
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : 'error' }, 500)
