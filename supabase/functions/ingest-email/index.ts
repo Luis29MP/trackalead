@@ -202,6 +202,15 @@ serve(async (req) => {
 
     await log({ org_id: route.org_id, board_id: route.board_id, route_key: route.key, status: 'created', from_addr: from, subject, raw_excerpt: excerpt, lead_id: lead.id })
 
+    // Aviso IN-APP (campana) para los responsables: dueño, admins y colaboradores
+    try {
+      const { data: members } = await admin.from('org_members').select('user_id').eq('org_id', route.org_id).in('role', ['owner', 'admin', 'manager'])
+      const title = `🔔 Nuevo lead${route.label ? ` · ${route.label}` : ''}`
+      const nbody = `${name}${phone ? ` · ${phone}` : ''}${concept ? ` · ${concept}` : ''}`
+      const rows = (members ?? []).filter(m => m.user_id).map(m => ({ user_id: m.user_id, title, body: nbody, lead_id: lead.id, is_read: false }))
+      if (rows.length) await admin.from('notifications').insert(rows)
+    } catch { /* aviso no crítico */ }
+
     // Aviso por WhatsApp a los responsables (no crítico: no bloquea la creación)
     try {
       const { data: notif } = await admin.from('org_integrations').select('config').eq('org_id', route.org_id).eq('provider', 'lead_notify').maybeSingle()

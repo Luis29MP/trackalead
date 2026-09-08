@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Bell, CheckCheck } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -12,6 +13,7 @@ export function Notifications() {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [loading, setLoading] = useState(true)
   const { user } = useAuth()
+  const navigate = useNavigate()
 
   useEffect(() => {
     if (!user) return
@@ -82,7 +84,7 @@ export function Notifications() {
                 'cursor-pointer transition-colors hover:bg-gray-50',
                 !n.is_read && 'border-l-4 border-l-primary-500'
               )}
-              onClick={() => markRead(n.id)}
+              onClick={() => { markRead(n.id); if (n.lead_id) navigate(`/leads/${n.lead_id}`) }}
             >
               <CardContent className="p-4">
                 <div className="flex items-start gap-3">

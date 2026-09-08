@@ -18,6 +18,7 @@ import { Conversations } from '@/pages/Conversations'
 import { Professionals } from '@/pages/Professionals'
 import { Team } from '@/pages/Team'
 import { Notifications } from '@/pages/Notifications'
+import { EmailInbox } from '@/pages/EmailInbox'
 import { Settings } from '@/pages/Settings'
 import { PublicLeadView } from '@/pages/PublicLeadView'
 import { ProPanel } from '@/pages/ProPanel'
@@ -141,6 +142,7 @@ function AppRoutes() {
         <Route path="/budgets"       element={<Budgets />} />
         <Route path="/invoices"      element={<Invoices />} />
         <Route path="/conversations" element={<Conversations />} />
+        <Route path="/email-inbox"   element={<EmailInbox />} />
         <Route path="/professionals" element={<Professionals />} />
         <Route path="/team"          element={<Team />} />
         <Route path="/notifications" element={<Notifications />} />

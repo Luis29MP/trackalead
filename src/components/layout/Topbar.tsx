@@ -71,11 +71,12 @@ export function Topbar() {
     if (results.length > 0) goToLead(results[0].id)   // Enter → primer resultado
   }
 
-  function handleNotifClick(n: { id: string; body: string; calendar_event_id?: string | null }) {
+  function handleNotifClick(n: { id: string; body: string; lead_id?: string | null; calendar_event_id?: string | null }) {
     markRead(n.id)
     setNotifOpen(false)
-    // Navegar al lead si el cuerpo menciona un lead_id (futuro), por ahora ir a notificaciones
-    navigate('/notifications')
+    // Si el aviso está enlazado a un lead (p. ej. nuevo lead por email), abre su ficha
+    if (n.lead_id) navigate(`/leads/${n.lead_id}`)
+    else navigate('/notifications')
   }
 
   return (
@@ -172,7 +173,7 @@ export function Topbar() {
 function NotifDropdown({ notifications, unreadCount, onMarkRead, onMarkAll, onClose, navigate }: {
   notifications: Array<{ id: string; title: string; body: string; is_read: boolean; created_at: string; calendar_event_id?: string | null }>
   unreadCount: number
-  onMarkRead: (n: { id: string; body: string; calendar_event_id?: string | null }) => void
+  onMarkRead: (n: { id: string; body: string; lead_id?: string | null; calendar_event_id?: string | null }) => void
   onMarkAll: () => void
   onClose: () => void
   navigate: (path: string) => void

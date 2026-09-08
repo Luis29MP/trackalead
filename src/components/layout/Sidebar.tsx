@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, LayoutGrid, Map, Calendar, DollarSign,
   HardHat, Users, Bell, Settings, LogOut, Radar,
-  ChevronDown, Check, Building2, Shield, Star, FileText, MessageCircle, Receipt,
+  ChevronDown, Check, Building2, Shield, Star, FileText, MessageCircle, Receipt, Mail,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
@@ -15,6 +15,7 @@ import type { Organization } from '@/types'
 const NAV_ITEMS = [
   { to: '/dashboard',     icon: LayoutDashboard, label: 'Panel Control' },
   { to: '/boards',        icon: LayoutGrid,      label: 'Tableros' },
+  { to: '/email-inbox',   icon: Mail,            label: 'Bandeja emails' },
   { to: '/map',           icon: Map,             label: 'Mapa' },
   { to: '/calendar',      icon: Calendar,        label: 'Calendario' },
   { to: '/finances',      icon: DollarSign,      label: 'Finanzas' },
