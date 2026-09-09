@@ -20,7 +20,6 @@ const NAV_ITEMS = [
   { to: '/calendar',      icon: Calendar,        label: 'Calendario' },
   { to: '/finances',      icon: DollarSign,      label: 'Finanzas' },
   { to: '/budgets',       icon: FileText,        label: 'Presupuestos' },
-  { to: '/budget-library',icon: BookOpen,        label: 'Biblioteca' },
   { to: '/invoices',      icon: Receipt,         label: 'Facturas' },
   { to: '/professionals', icon: HardHat,         label: 'Profesionales' },
   { to: '/pro-activity',  icon: TrendingUp,      label: 'Actividad pros' },

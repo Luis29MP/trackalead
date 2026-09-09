@@ -19,7 +19,6 @@ const DRAWER_ITEMS = [
   { to: '/email-inbox',   icon: Mail,       label: 'Bandeja emails' },
   { to: '/finances',      icon: DollarSign, label: 'Finanzas' },
   { to: '/budgets',       icon: FileText,   label: 'Presupuestos' },
-  { to: '/budget-library',icon: BookOpen,   label: 'Biblioteca' },
   { to: '/invoices',      icon: Receipt,    label: 'Facturas' },
   { to: '/professionals', icon: HardHat,    label: 'Profesionales' },
   { to: '/pro-activity',  icon: TrendingUp, label: 'Actividad pros' },

@@ -112,6 +112,8 @@ export function Budgets() {
   const [confirmApprove, setConfirmApprove] = useState<Budget | null>(null)
   const [approving, setApproving] = useState(false)
   const [marginBudget, setMarginBudget] = useState<Budget | null>(null)
+  const [ownBudgets, setOwnBudgets] = useState<{ id: string; professional_id: string; client_name: string | null; concept: string | null; lines: BudgetLine[]; subtotal: number; vat_percent: number; total: number; notes: string | null; created_at: string }[]>([])
+  const [memberMap, setMemberMap] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!organization) return
@@ -127,12 +129,18 @@ export function Budgets() {
   }
 
   async function loadLeadsAndPros() {
-    const [{ data: leadsData }, { data: prosData }] = await Promise.all([
+    const [{ data: leadsData }, { data: prosData }, { data: own }, { data: mem }] = await Promise.all([
       supabase.from('leads').select('id, name, phone, address, concept, zone, notes').eq('org_id', organization!.id).eq('is_archived', false).order('created_at', { ascending: false }),
-      supabase.from('professionals').select('*').eq('org_id', organization!.id).eq('is_active', true).order('name'),
+      supabase.from('professionals').select('*').eq('org_id', organization!.id).order('name'),
+      supabase.from('pro_own_budgets').select('id, professional_id, client_name, concept, lines, subtotal, vat_percent, total, notes, created_at').eq('org_id', organization!.id).order('created_at', { ascending: false }),
+      supabase.from('org_members').select('user_id, profile:profiles(full_name)').eq('org_id', organization!.id),
     ])
     setLeads((leadsData ?? []) as Lead[])
     setProfessionals((prosData ?? []) as Professional[])
+    setOwnBudgets((own ?? []) as typeof ownBudgets)
+    const map: Record<string, string> = {}
+    for (const m of (mem ?? []) as { user_id: string; profile: { full_name: string | null } | null }[]) if (m.user_id) map[m.user_id] = m.profile?.full_name ?? 'Equipo'
+    setMemberMap(map)
   }
 
   function openNew() {
@@ -170,6 +178,20 @@ export function Budgets() {
 
   function exportPdf(b: Budget) {
     exportBudgetPdf(b, buildIssuer(b, professionals, organization?.name))
+  }
+
+  function proName(id?: string | null): string { return professionals.find(p => p.id === id)?.name ?? 'Profesional' }
+  function creatorLabel(b: Budget): string {
+    if (b.created_by && memberMap[b.created_by]) return memberMap[b.created_by]
+    if (b.professional_id) return `👷 ${proName(b.professional_id)}`
+    return '—'
+  }
+  function ownPdf(b: typeof ownBudgets[number]) {
+    const pro = professionals.find(p => p.id === b.professional_id)
+    const addr = pro ? [pro.address, pro.cif ? `NIF: ${pro.cif}` : null].filter(Boolean).join('  ·  ') : ''
+    const issuer = pro ? { name: pro.company_name || pro.name, phone: pro.phone, email: pro.email, address: addr || null, logoUrl: pro.logo_url ?? null } : { name: organization?.name }
+    const like = { id: b.id, client_name: b.client_name, client_phone: null, client_address: null, concept: b.concept, lines: b.lines, subtotal: b.subtotal, vat_percent: b.vat_percent, vat_amount: Math.round(b.subtotal * (b.vat_percent || 0)) / 100, total: b.total, notes: b.notes, created_at: b.created_at, validity_days: 30 }
+    viewBudgetPdf(like as unknown as Budget, issuer)
   }
 
   // Mueve el lead vinculado a la columna "Presupuestado" de su tablero
@@ -219,7 +241,7 @@ export function Budgets() {
 
       {loading ? (
         <div className="flex justify-center py-10"><div className="animate-spin h-6 w-6 border-4 border-primary-600 border-t-transparent rounded-full" /></div>
-      ) : budgets.length === 0 ? (
+      ) : (budgets.length === 0 && ownBudgets.length === 0) ? (
         <div className="text-center py-16">
           <FileText className="h-12 w-12 mx-auto text-gray-300 mb-4" />
           <h3 className="text-lg font-medium text-gray-900">Sin presupuestos</h3>
@@ -232,8 +254,9 @@ export function Budgets() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50 text-xs text-gray-500 uppercase">
-                  <th className="text-left px-4 py-3">Cliente</th>
+                  <th className="text-left px-4 py-3">Cliente / Lead</th>
                   <th className="text-left px-3 py-3">Concepto</th>
+                  <th className="text-left px-3 py-3">Creado por</th>
                   <th className="text-right px-3 py-3">Total</th>
                   <th className="text-left px-3 py-3">Estado</th>
                   <th className="text-left px-3 py-3">Fecha</th>
@@ -253,6 +276,7 @@ export function Budgets() {
                       )}
                     </td>
                     <td className="px-3 py-3 text-gray-500 max-w-[220px] truncate">{b.concept || '—'}</td>
+                    <td className="px-3 py-3 text-xs text-gray-600">{creatorLabel(b)}</td>
                     <td className="px-3 py-3 text-right font-semibold text-gray-900">{formatCurrency(b.total)}</td>
                     <td className="px-3 py-3">
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${STATUS_META[b.status]?.color ?? STATUS_META.draft.color}`}>
@@ -272,6 +296,21 @@ export function Budgets() {
                         <button onClick={() => setMarginBudget(b)} className="p-1.5 rounded hover:bg-amber-50 text-amber-600" title="Preparar para cliente (margen)"><Percent className="h-3.5 w-3.5" /></button>
                         <button onClick={() => exportPdf(b)} className="p-1.5 rounded hover:bg-blue-50 text-blue-500" title="Exportar PDF"><Download className="h-3.5 w-3.5" /></button>
                         <button onClick={() => handleDelete(b.id)} className="p-1.5 rounded hover:bg-red-50 text-red-400" title="Eliminar"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {ownBudgets.map(b => (
+                  <tr key={`own-${b.id}`} className="hover:bg-gray-50 bg-indigo-50/30">
+                    <td className="px-4 py-3 font-medium text-gray-900">{b.client_name || '—'}</td>
+                    <td className="px-3 py-3 text-gray-500 max-w-[220px] truncate">{b.concept || '—'}</td>
+                    <td className="px-3 py-3 text-xs text-gray-600">👷 {proName(b.professional_id)} · <span className="text-indigo-500">trabajo propio</span></td>
+                    <td className="px-3 py-3 text-right font-semibold text-gray-900">{formatCurrency(b.total)}</td>
+                    <td className="px-3 py-3"><span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">Propio del pro</span></td>
+                    <td className="px-3 py-3 text-xs text-gray-400">{formatDate(b.created_at)}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button onClick={() => ownPdf(b)} className="p-1.5 rounded hover:bg-blue-50 text-blue-500" title="Ver PDF"><Download className="h-3.5 w-3.5" /></button>
                       </div>
                     </td>
                   </tr>
