@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, LayoutGrid, Map, Calendar, Menu, X,
   DollarSign, HardHat, Users, Bell, Settings, LogOut, Radar,
-  Mail, FileText, Receipt, BookOpen,
+  Mail, FileText, Receipt, BookOpen, TrendingUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
@@ -22,6 +22,7 @@ const DRAWER_ITEMS = [
   { to: '/budget-library',icon: BookOpen,   label: 'Biblioteca' },
   { to: '/invoices',      icon: Receipt,    label: 'Facturas' },
   { to: '/professionals', icon: HardHat,    label: 'Profesionales' },
+  { to: '/pro-activity',  icon: TrendingUp, label: 'Actividad pros' },
   { to: '/team',          icon: Users,      label: 'Equipo' },
   { to: '/notifications', icon: Bell,       label: 'Notificaciones' },
   { to: '/settings',      icon: Settings,   label: 'Configuración' },
