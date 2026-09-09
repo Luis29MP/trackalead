@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   FileText, Plus, Sparkles, Download, Pencil, Trash2, Search,
-  ArrowLeft, ArrowRight, Check, ImagePlus, X, Layers, CheckCircle2, MessageCircle, Eye,
+  ArrowLeft, ArrowRight, Check, ImagePlus, X, Layers, CheckCircle2, MessageCircle, Eye, Percent,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { generateBudget, generateBudgetSplit, splitBudgetOptions, type AiImage } from '@/lib/ai'
 import { fetchGenerationKnowledge } from '@/lib/proKnowledge'
-import { exportBudgetPdf, viewBudgetPdf, exportBudgetComparison, type PdfOrgInfo } from '@/lib/budgetPdf'
+import { exportBudgetPdf, viewBudgetPdf, exportBudgetComparison, toClientBudget, type PdfOrgInfo } from '@/lib/budgetPdf'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -111,6 +111,7 @@ export function Budgets() {
   const [professionals, setProfessionals] = useState<Professional[]>([])
   const [confirmApprove, setConfirmApprove] = useState<Budget | null>(null)
   const [approving, setApproving] = useState(false)
+  const [marginBudget, setMarginBudget] = useState<Budget | null>(null)
 
   useEffect(() => {
     if (!organization) return
@@ -268,6 +269,7 @@ export function Budgets() {
                         )}
                         <button onClick={() => sendWhatsApp(b)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-500" title="Enviar por WhatsApp"><MessageCircle className="h-4 w-4" /></button>
                         <button onClick={() => openEdit(b)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500" title="Ver / Editar"><Pencil className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => setMarginBudget(b)} className="p-1.5 rounded hover:bg-amber-50 text-amber-600" title="Preparar para cliente (margen)"><Percent className="h-3.5 w-3.5" /></button>
                         <button onClick={() => exportPdf(b)} className="p-1.5 rounded hover:bg-blue-50 text-blue-500" title="Exportar PDF"><Download className="h-3.5 w-3.5" /></button>
                         <button onClick={() => handleDelete(b.id)} className="p-1.5 rounded hover:bg-red-50 text-red-400" title="Eliminar"><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
@@ -292,6 +294,16 @@ export function Budgets() {
           onClose={() => setWizardOpen(false)}
           onSaved={() => { loadBudgets() }}
           onEditBudget={(b) => openEdit(b)}
+        />
+      )}
+
+      {marginBudget && (
+        <MarginDialog
+          budget={marginBudget}
+          professionals={professionals}
+          orgName={organization?.name}
+          onClose={() => setMarginBudget(null)}
+          onSaved={() => { loadBudgets(); setMarginBudget(null) }}
         />
       )}
 
@@ -984,6 +996,91 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
         )}
         </>
         )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// Motor de márgenes: aplica tu comisión sobre el coste del profesional, permite marcar
+// líneas como internas (no van al cliente) y saca el PDF del cliente (sin precio unitario,
+// membrete del profesional) y el PDF interno (con coste, para ti).
+function MarginDialog({ budget, professionals, orgName, onClose, onSaved }: {
+  budget: Budget; professionals: Professional[]; orgName?: string; onClose: () => void; onSaved: () => void
+}) {
+  const [margin, setMargin] = useState<number>(budget.margin_percent || 15)
+  const [lines, setLines] = useState<BudgetLine[]>((budget.lines ?? []).map(l => ({ ...l })))
+  const [saving, setSaving] = useState(false)
+
+  const r2 = (n: number) => Math.round(n * 100) / 100
+  const factor = 1 + (margin || 0) / 100
+  const costSub = r2(lines.filter(l => !l.internal).reduce((s, l) => s + (l.total || 0), 0))
+  const pvpSub = r2(costSub * factor)
+  const margenEur = r2(pvpSub - costSub)
+
+  function toggleInternal(i: number) { setLines(prev => prev.map((l, idx) => idx === i ? { ...l, internal: !l.internal } : l)) }
+
+  function proIssuer(): PdfOrgInfo {
+    const pro = professionals.find(p => p.id === budget.professional_id)
+    if (!pro) return { name: orgName }
+    const addr = [pro.address, pro.cif ? `NIF: ${pro.cif}` : null].filter(Boolean).join('  ·  ')
+    return { name: pro.company_name || pro.name, phone: pro.phone, email: pro.email, address: addr || null, logoUrl: pro.logo_url ?? null }
+  }
+
+  async function save() {
+    setSaving(true)
+    const { error } = await supabase.from('budgets').update({ margin_percent: margin, lines }).eq('id', budget.id)
+    setSaving(false)
+    if (error) { toast.error('No se pudo guardar'); return }
+    toast.success('Margen guardado'); onSaved()
+  }
+  function pdfCliente() { viewBudgetPdf(toClientBudget({ ...budget, lines }, margin), proIssuer(), { hideUnitPrice: true }) }
+  function pdfInterno() { viewBudgetPdf({ ...budget, lines }, proIssuer()) }
+
+  return (
+    <Dialog open onOpenChange={v => { if (!v) onClose() }}>
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle className="flex items-center gap-2"><Percent className="h-5 w-5 text-amber-600" />Preparar para cliente</DialogTitle></DialogHeader>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="text-sm text-gray-600 flex items-center gap-2">Margen sobre cada partida
+              <Input type="number" min={0} step="0.5" value={margin} onChange={e => setMargin(Number(e.target.value))} className="h-9 w-20 text-right" />%
+            </label>
+            <span className="text-xs text-gray-400">El PDF del cliente sale sin precio unitario y con el membrete del profesional.</span>
+          </div>
+
+          <div className="border border-gray-100 rounded-lg overflow-x-auto">
+            <table className="w-full text-sm min-w-[420px]">
+              <thead><tr className="bg-gray-50 text-[11px] text-gray-500 uppercase">
+                <th className="text-left px-3 py-2">Concepto</th>
+                <th className="text-right px-2 py-2 w-24">Coste</th>
+                <th className="text-right px-2 py-2 w-24">PVP</th>
+                <th className="text-center px-2 py-2 w-20">Interna</th>
+              </tr></thead>
+              <tbody className="divide-y divide-gray-50">
+                {lines.map((l, i) => (
+                  <tr key={i} className={l.internal ? 'opacity-50' : ''}>
+                    <td className="px-3 py-1.5 text-gray-700">{l.concept}</td>
+                    <td className="px-2 py-1.5 text-right text-gray-500">{formatCurrency(l.total)}</td>
+                    <td className="px-2 py-1.5 text-right font-medium text-gray-900">{l.internal ? '—' : formatCurrency(r2((l.total || 0) * factor))}</td>
+                    <td className="px-2 py-1.5 text-center"><Switch checked={!!l.internal} onCheckedChange={() => toggleInternal(i)} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="bg-gray-50 rounded-lg p-3"><p className="text-[11px] text-gray-400 uppercase">Coste (pro)</p><p className="text-lg font-bold text-gray-800">{formatCurrency(costSub)}</p></div>
+            <div className="bg-emerald-50 rounded-lg p-3"><p className="text-[11px] text-emerald-600 uppercase">Tu margen</p><p className="text-lg font-bold text-emerald-700">{formatCurrency(margenEur)}</p></div>
+            <div className="bg-primary-50 rounded-lg p-3"><p className="text-[11px] text-primary-600 uppercase">PVP (cliente)</p><p className="text-lg font-bold text-primary-700">{formatCurrency(pvpSub)}</p></div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 justify-end">
+            <Button variant="outline" onClick={pdfInterno} className="gap-1.5"><Eye className="h-4 w-4" />PDF interno</Button>
+            <Button variant="outline" onClick={pdfCliente} className="gap-1.5 text-primary-700 border-primary-300"><Download className="h-4 w-4" />PDF cliente</Button>
+            <Button onClick={save} disabled={saving}>{saving ? 'Guardando…' : 'Guardar margen'}</Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   )

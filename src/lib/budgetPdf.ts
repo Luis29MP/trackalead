@@ -30,7 +30,7 @@ function sanitizeClientNotes(text: string): string {
     .trim()
 }
 
-function buildDoc(budget: Budget, org: PdfOrgInfo = {}): { doc: jsPDF; fileName: string } {
+function buildDoc(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: boolean } = {}): { doc: jsPDF; fileName: string } {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const marginX = 14
@@ -101,24 +101,19 @@ function buildDoc(budget: Budget, org: PdfOrgInfo = {}): { doc: jsPDF; fileName:
   y += clientLines.length * 4.8 + 4
 
   // ── Tabla de líneas ──────────────────────────────────────────────────────────
+  const hideUP = !!opts.hideUnitPrice
   autoTable(doc, {
     startY: y,
-    head: [['Concepto', 'Uds.', 'Precio/ud', 'Total']],
-    body: budget.lines.map(l => [
-      l.concept,
-      String(l.units),
-      eur(l.unit_price),
-      eur(l.total),
-    ]),
+    head: [hideUP ? ['Concepto', 'Uds.', 'Total'] : ['Concepto', 'Uds.', 'Precio/ud', 'Total']],
+    body: budget.lines.map(l => hideUP
+      ? [l.concept, String(l.units), eur(l.total)]
+      : [l.concept, String(l.units), eur(l.unit_price), eur(l.total)]),
     theme: 'striped',
     headStyles: { fillColor: PRIMARY, textColor: 255, fontStyle: 'bold', halign: 'left' },
     bodyStyles: { textColor: 40, fontSize: 9 },
-    columnStyles: {
-      0: { cellWidth: 'auto' },
-      1: { halign: 'center', cellWidth: 18 },
-      2: { halign: 'right', cellWidth: 30 },
-      3: { halign: 'right', cellWidth: 30, fontStyle: 'bold' },
-    },
+    columnStyles: hideUP
+      ? { 0: { cellWidth: 'auto' }, 1: { halign: 'center', cellWidth: 20 }, 2: { halign: 'right', cellWidth: 32, fontStyle: 'bold' } }
+      : { 0: { cellWidth: 'auto' }, 1: { halign: 'center', cellWidth: 18 }, 2: { halign: 'right', cellWidth: 30 }, 3: { halign: 'right', cellWidth: 30, fontStyle: 'bold' } },
     margin: { left: marginX, right: marginX },
   })
 
@@ -187,16 +182,30 @@ function buildDoc(budget: Budget, org: PdfOrgInfo = {}): { doc: jsPDF; fileName:
 }
 
 // Descarga el PDF
-export function exportBudgetPdf(budget: Budget, org: PdfOrgInfo = {}) {
-  const { doc, fileName } = buildDoc(budget, org)
+export function exportBudgetPdf(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: boolean } = {}) {
+  const { doc, fileName } = buildDoc(budget, org, opts)
   doc.save(fileName)
 }
 
 // Abre el PDF en una pestaña nueva del navegador (sin descargar) — para revisar/validar
-export function viewBudgetPdf(budget: Budget, org: PdfOrgInfo = {}) {
-  const { doc } = buildDoc(budget, org)
+export function viewBudgetPdf(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: boolean } = {}) {
+  const { doc } = buildDoc(budget, org, opts)
   const url = doc.output('bloburl') as unknown as string
   window.open(url, '_blank', 'noopener')
+}
+
+// Transforma un presupuesto (coste del profesional) al PVP del cliente aplicando el
+// margen a cada partida y quitando las líneas marcadas como internas.
+export function toClientBudget(budget: Budget, marginPercent: number): Budget {
+  const f = 1 + (marginPercent || 0) / 100
+  const r2 = (n: number) => Math.round(n * 100) / 100
+  const lines = (budget.lines ?? []).filter(l => !l.internal).map(l => ({
+    ...l, unit_price: r2((l.unit_price || 0) * f), total: r2((l.total || 0) * f),
+  }))
+  const subtotal = r2(lines.reduce((s, l) => s + (l.total || 0), 0))
+  const vat_amount = r2(subtotal * (budget.vat_percent || 0) / 100)
+  const total = r2(subtotal + vat_amount)
+  return { ...budget, lines, subtotal, vat_amount, total }
 }
 
 // Etiqueta corta de la propuesta ("Propuesta 1") a partir del nº final del concepto

@@ -213,6 +213,7 @@ export interface BudgetLine {
   units: number
   unit_price: number
   total: number
+  internal?: boolean   // línea interna: no se muestra en el PDF del cliente
 }
 
 // Partida (gremio) de un presupuesto, asignable a un profesional
