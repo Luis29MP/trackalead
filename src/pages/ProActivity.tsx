@@ -13,10 +13,17 @@ interface OwnBudget {
   lines: BudgetLine[]; subtotal: number; vat_percent: number; total: number; notes: string | null; created_at: string
 }
 interface LeadBudget { id: string; professional_id: string | null; client_name: string | null; concept: string | null; total: number; created_at: string }
+interface Usage { professional_id: string | null; cost_eur: number; created_at: string }
 
 function isThisMonth(iso: string): boolean {
   const d = new Date(iso), n = new Date()
   return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth()
+}
+// Coste en € con precisión adaptada (son céntimos): pocas cifras → más decimales
+function fmtCost(n: number): string {
+  if (n === 0) return '0 €'
+  if (n < 1) return `${n.toFixed(4).replace('.', ',')} €`
+  return `${n.toFixed(2).replace('.', ',')} €`
 }
 
 export function ProActivity() {
@@ -24,6 +31,7 @@ export function ProActivity() {
   const [pros, setPros] = useState<Professional[]>([])
   const [own, setOwn] = useState<OwnBudget[]>([])
   const [leadB, setLeadB] = useState<LeadBudget[]>([])
+  const [usage, setUsage] = useState<Usage[]>([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
@@ -31,14 +39,16 @@ export function ProActivity() {
 
   async function load() {
     setLoading(true)
-    const [{ data: p }, { data: o }, { data: lb }] = await Promise.all([
+    const [{ data: p }, { data: o }, { data: lb }, { data: u }] = await Promise.all([
       supabase.from('professionals').select('*').eq('org_id', organization!.id).order('name'),
       supabase.from('pro_own_budgets').select('*').eq('org_id', organization!.id).order('created_at', { ascending: false }),
       supabase.from('budgets').select('id, professional_id, client_name, concept, total, created_at').eq('org_id', organization!.id).not('professional_id', 'is', null),
+      supabase.from('ai_usage').select('professional_id, cost_eur, created_at').eq('org_id', organization!.id),
     ])
     setPros((p ?? []) as Professional[])
     setOwn((o ?? []) as OwnBudget[])
     setLeadB((lb ?? []) as LeadBudget[])
+    setUsage((u ?? []) as Usage[])
     setLoading(false)
   }
 
@@ -57,6 +67,8 @@ export function ProActivity() {
   const leadMonth = leadB.filter(b => isThisMonth(b.created_at)).length
   const genMonth = ownMonth + leadMonth
   const genTotal = own.length + leadB.length
+  const costMonth = usage.filter(u => isThisMonth(u.created_at)).reduce((s, u) => s + Number(u.cost_eur || 0), 0)
+  const costTotal = usage.reduce((s, u) => s + Number(u.cost_eur || 0), 0)
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -66,11 +78,13 @@ export function ProActivity() {
       </div>
 
       {/* Resumen */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Card><CardContent className="p-4"><p className="text-xs text-gray-400 uppercase tracking-wide">Generados este mes</p><p className="text-2xl font-bold text-gray-900 mt-1">{genMonth}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-400 uppercase tracking-wide">Generados en total</p><p className="text-2xl font-bold text-gray-900 mt-1">{genTotal}</p></CardContent></Card>
-        <Card className="col-span-2 sm:col-span-1"><CardContent className="p-4"><p className="text-xs text-gray-400 uppercase tracking-wide">Profesionales activos</p><p className="text-2xl font-bold text-gray-900 mt-1">{pros.length}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-400 uppercase tracking-wide">Coste IA (mes)</p><p className="text-2xl font-bold text-emerald-600 mt-1">{fmtCost(costMonth)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-400 uppercase tracking-wide">Generados total</p><p className="text-2xl font-bold text-gray-900 mt-1">{genTotal}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-400 uppercase tracking-wide">Coste IA (total)</p><p className="text-2xl font-bold text-emerald-600 mt-1">{fmtCost(costTotal)}</p></CardContent></Card>
       </div>
+      <p className="text-[11px] text-gray-400 -mt-2">El coste de IA es una estimación (tokens × precio del modelo). Sirve para controlar el gasto y justificar el cobro del servicio.</p>
 
       {loading ? (
         <div className="flex justify-center py-10"><div className="animate-spin h-6 w-6 border-4 border-primary-600 border-t-transparent rounded-full" /></div>
@@ -82,6 +96,7 @@ export function ProActivity() {
             const ownList = own.filter(b => b.professional_id === pro.id)
             const leadList = leadB.filter(b => b.professional_id === pro.id)
             const ownTotal = ownList.reduce((s, b) => s + (b.total || 0), 0)
+            const proCost = usage.filter(u => u.professional_id === pro.id).reduce((s, u) => s + Number(u.cost_eur || 0), 0)
             const lastDates = [...ownList, ...leadList].map(b => b.created_at).sort().reverse()
             const isOpen = expanded.has(pro.id)
             const hasActivity = ownList.length + leadList.length > 0
@@ -96,6 +111,7 @@ export function ProActivity() {
                         <span className="inline-flex items-center gap-1"><Sparkles className="h-3 w-3 text-primary-500" />{ownList.length} propio{ownList.length !== 1 ? 's' : ''}</span>
                         {' · '}
                         <span className="inline-flex items-center gap-1"><FileText className="h-3 w-3 text-blue-500" />{leadList.length} de leads</span>
+                        {proCost > 0 && <> · <span className="text-emerald-600 font-medium">{fmtCost(proCost)} IA</span></>}
                         {lastDates[0] && <> · última: {formatDate(lastDates[0])}</>}
                       </p>
                     </div>

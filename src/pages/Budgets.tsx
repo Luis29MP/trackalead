@@ -417,6 +417,8 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
           extraInstructions: draft.ai_instructions,
           images: aiImages,
           knowledge,
+          professionalId: draft.professional_id ?? undefined,
+          orgId,
         })
         await saveSplit(results)
         toast.success(`${results.length} presupuesto(s) generado(s) por gremio`)
@@ -431,6 +433,8 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
           extraInstructions: draft.ai_instructions,
           images: aiImages,
           knowledge,
+          professionalId: draft.professional_id ?? undefined,
+          orgId,
         })
         // Si la IA generó varias opciones/alternativas → un presupuesto por opción
         const options = splitBudgetOptions(result.lines)

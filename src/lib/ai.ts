@@ -53,8 +53,10 @@ export async function generateBudget(params: {
   images?: AiImage[]
   userId?: string   // si se pasa, usa las claves de IA de ese usuario (p.ej. el dueño de la org desde el panel del profesional)
   knowledge?: string  // base de conocimiento del profesional (presupuestos de ejemplo, tarifas…)
+  professionalId?: string // para atribuir el coste de la IA al profesional
+  orgId?: string          // para registrar el uso en su organización
 }): Promise<GeneratedBudget> {
-  const { clientName, concept, notes, zone, marginPercent, proRates, extraInstructions, images, userId, knowledge } = params
+  const { clientName, concept, notes, zone, marginPercent, proRates, extraInstructions, images, userId, knowledge, professionalId, orgId } = params
 
   const ratesText = proRates && proRates.length > 0
     ? `\nEl profesional asignado tiene estas tarifas (úsalas como referencia prioritaria): ${proRates.map(r => `${r.work_type}: ${r.rec_price}€/${r.unit} (mín ${r.min_price}€)`).join('; ')}.`
@@ -95,7 +97,7 @@ Tu ÚLTIMA salida debe ser SOLO un objeto JSON válido (sin texto antes ni despu
   if (!uid) throw new Error('No hay usuario para la IA')
 
   const { data, error } = await supabase.functions.invoke('ai-proxy', {
-    body: { user_id: uid, prompt: userPrompt, system, max_tokens: 4000, web_search: false, images: images ?? [] },
+    body: { user_id: uid, prompt: userPrompt, system, max_tokens: 4000, web_search: false, images: images ?? [], label: 'budget', professional_id: professionalId ?? null, org_id: orgId ?? null },
   })
   if (error) {
     // Extraer el mensaje real que devolvió la Edge Function (no el genérico)
@@ -148,8 +150,10 @@ export async function generateBudgetSplit(params: {
   images?: AiImage[]
   userId?: string
   knowledge?: string
+  professionalId?: string
+  orgId?: string
 }): Promise<GeneratedBudgetSplit[]> {
-  const { clientName, concept, notes, zone, marginPercent, extraInstructions, images, userId, knowledge } = params
+  const { clientName, concept, notes, zone, marginPercent, extraInstructions, images, userId, knowledge, professionalId, orgId } = params
   const extraText = extraInstructions?.trim() ? `\nNotas adicionales del usuario: ${extraInstructions.trim()}` : ''
   const imgText = images && images.length ? `\nSe adjuntan ${images.length} foto(s) del trabajo: analízalas para estimar.` : ''
   const knowledgeText = knowledge?.trim() ? `\n\nCONOCIMIENTO DEL PROFESIONAL (úsalo como referencia principal de precios):\n${knowledge.trim()}` : ''
@@ -184,7 +188,7 @@ Tu ÚLTIMA salida debe ser SOLO un objeto JSON válido (sin texto antes ni despu
   if (!uid) throw new Error('No hay usuario para la IA')
 
   const { data, error } = await supabase.functions.invoke('ai-proxy', {
-    body: { user_id: uid, prompt: userPrompt, system, max_tokens: 6000, web_search: false, images: images ?? [] },
+    body: { user_id: uid, prompt: userPrompt, system, max_tokens: 6000, web_search: false, images: images ?? [], label: 'budget', professional_id: professionalId ?? null, org_id: orgId ?? null },
   })
   if (error) {
     let detail = error.message

@@ -47,7 +47,27 @@ function normalizeModel(provider: string, model: string): string {
   return MODEL_ALIASES[provider]?.[model] ?? model
 }
 
-async function callAnthropic(key: string, model: string, prompt: string, system: string | undefined, maxTokens: number, webSearch: boolean, images: ImagePart[]): Promise<string> {
+interface Usage { prompt: number; completion: number }
+// Precios ORIENTATIVOS en USD por 1M tokens {in, out}. Coste estimado, no factura.
+const PRICE: Record<string, { in: number; out: number }> = {
+  'gemini-2.5-flash':      { in: 0.30, out: 2.50 },
+  'gemini-2.5-flash-lite': { in: 0.10, out: 0.40 },
+  'gemini-2.5-pro':        { in: 1.25, out: 10 },
+  'gemini-2.0-flash':      { in: 0.10, out: 0.40 },
+  'gpt-4o-mini':           { in: 0.15, out: 0.60 },
+  'gpt-4o':                { in: 2.50, out: 10 },
+  'claude-haiku-4-5':      { in: 1.00, out: 5.00 },
+  'claude-sonnet-4-6':     { in: 3.00, out: 15.00 },
+  'claude-opus-4-8':       { in: 15.00, out: 75.00 },
+}
+const USD_TO_EUR = 0.92
+function estimateCostEur(model: string, u: Usage): number {
+  const p = PRICE[model] ?? { in: 0.5, out: 2.0 }
+  const usd = (u.prompt / 1e6) * p.in + (u.completion / 1e6) * p.out
+  return Math.round(usd * USD_TO_EUR * 1e6) / 1e6   // 6 decimales
+}
+
+async function callAnthropic(key: string, model: string, prompt: string, system: string | undefined, maxTokens: number, webSearch: boolean, images: ImagePart[]): Promise<{ text: string; usage: Usage }> {
   const content: unknown[] = [{ type: 'text', text: prompt }]
   for (const img of images) content.push({ type: 'image', source: { type: 'base64', media_type: img.mime, data: img.data } })
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -66,10 +86,10 @@ async function callAnthropic(key: string, model: string, prompt: string, system:
   // Concatenar todos los bloques de texto (con web_search hay varios bloques)
   const text = (data?.content ?? []).filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('\n').trim()
   if (!text) throw new Error('anthropic: respuesta vacía')
-  return text
+  return { text, usage: { prompt: data?.usage?.input_tokens ?? 0, completion: data?.usage?.output_tokens ?? 0 } }
 }
 
-async function callOpenAI(key: string, model: string, prompt: string, system: string | undefined, maxTokens: number, images: ImagePart[]): Promise<string> {
+async function callOpenAI(key: string, model: string, prompt: string, system: string | undefined, maxTokens: number, images: ImagePart[]): Promise<{ text: string; usage: Usage }> {
   const messages: { role: string; content: unknown }[] = []
   if (system) messages.push({ role: 'system', content: system })
   if (images.length) {
@@ -88,10 +108,10 @@ async function callOpenAI(key: string, model: string, prompt: string, system: st
   const data = await res.json()
   const text = data?.choices?.[0]?.message?.content
   if (!text) throw new Error('openai: respuesta vacía')
-  return text
+  return { text, usage: { prompt: data?.usage?.prompt_tokens ?? 0, completion: data?.usage?.completion_tokens ?? 0 } }
 }
 
-async function callGemini(key: string, model: string, prompt: string, system: string | undefined, maxTokens: number, webSearch: boolean, images: ImagePart[]): Promise<string> {
+async function callGemini(key: string, model: string, prompt: string, system: string | undefined, maxTokens: number, webSearch: boolean, images: ImagePart[]): Promise<{ text: string; usage: Usage }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
   // gemini-2.5-pro OBLIGA a usar "thinking" (thinkingBudget 0 da error 400).
   // flash / flash-lite sí permiten desactivarlo (0) para que no trunque el JSON.
@@ -138,14 +158,14 @@ async function callGemini(key: string, model: string, prompt: string, system: st
     const reason = cand?.finishReason || data?.promptFeedback?.blockReason || 'desconocido'
     throw new Error(`gemini: respuesta sin texto (finishReason=${reason}). Si es MAX_TOKENS, reduce los adjuntos o sube max_tokens; si es SAFETY/RECITATION, revisa el contenido enviado.`)
   }
-  return text
+  return { text, usage: { prompt: data?.usageMetadata?.promptTokenCount ?? 0, completion: data?.usageMetadata?.candidatesTokenCount ?? 0 } }
 }
 
-async function callProvider(row: KeyRow, prompt: string, system: string | undefined, model: string | undefined, maxTokens: number, webSearch: boolean, images: ImagePart[]): Promise<string> {
+async function callProvider(row: KeyRow, prompt: string, system: string | undefined, model: string | undefined, maxTokens: number, webSearch: boolean, images: ImagePart[]): Promise<{ text: string; usage: Usage; model: string }> {
   const m = normalizeModel(row.provider, model || row.preferred_model || DEFAULT_MODEL[row.provider])
-  if (row.provider === 'anthropic') return callAnthropic(row.api_key, m, prompt, system, maxTokens, webSearch, images)
-  if (row.provider === 'openai')    return callOpenAI(row.api_key, m, prompt, system, maxTokens, images)
-  if (row.provider === 'gemini')    return callGemini(row.api_key, m, prompt, system, maxTokens, webSearch, images)
+  if (row.provider === 'anthropic') return { ...(await callAnthropic(row.api_key, m, prompt, system, maxTokens, webSearch, images)), model: m }
+  if (row.provider === 'openai')    return { ...(await callOpenAI(row.api_key, m, prompt, system, maxTokens, images)), model: m }
+  if (row.provider === 'gemini')    return { ...(await callGemini(row.api_key, m, prompt, system, maxTokens, webSearch, images)), model: m }
   throw new Error(`Proveedor desconocido: ${row.provider}`)
 }
 
@@ -153,7 +173,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { user_id, prompt, provider, model, system, max_tokens, web_search, images } = await req.json()
+    const { user_id, prompt, provider, model, system, max_tokens, web_search, images, label, professional_id, org_id } = await req.json()
     if (!user_id) return json({ error: 'user_id requerido' }, 400)
     if (!prompt)  return json({ error: 'prompt requerido' }, 400)
     const maxTokens = Number(max_tokens) || 1500
@@ -209,8 +229,25 @@ serve(async (req) => {
       try {
         // Solo respetar el override de modelo para el primer proveedor solicitado
         const useModel = provider && row.provider === provider ? model : undefined
-        const text = await callProvider(row, prompt, system, useModel, maxTokens, webSearch, imgParts)
-        return json({ text, provider: row.provider, model: useModel || row.preferred_model || DEFAULT_MODEL[row.provider] })
+        const { text, usage, model: usedModel } = await callProvider(row, prompt, system, useModel, maxTokens, webSearch, imgParts)
+        const costEur = estimateCostEur(usedModel, usage)
+
+        // Registrar el uso (no crítico: nunca rompe la respuesta)
+        try {
+          let orgId = org_id ?? null
+          if (!orgId) {
+            const { data: om } = await supabase.from('org_members').select('org_id').eq('user_id', user_id).limit(1).maybeSingle()
+            orgId = om?.org_id ?? null
+          }
+          await supabase.from('ai_usage').insert({
+            org_id: orgId, user_id, professional_id: professional_id ?? null,
+            provider: row.provider, model: usedModel,
+            prompt_tokens: usage.prompt, completion_tokens: usage.completion, total_tokens: usage.prompt + usage.completion,
+            cost_eur: costEur, label: label ?? null,
+          })
+        } catch { /* log no crítico */ }
+
+        return json({ text, provider: row.provider, model: usedModel, usage, cost_eur: costEur })
       } catch (e) {
         errors.push(String(e))
         // fallback silencioso al siguiente proveedor

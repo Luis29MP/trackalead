@@ -245,6 +245,8 @@ export function ProPanel() {
         proRates: professional.rates,
         userId: ownerId ?? undefined,
         knowledge,
+        professionalId: professional.id,
+        orgId: professional.org_id,
       })
       const subtotal = result.subtotal
       const vatAmount = Math.round(subtotal * 21) / 100
@@ -284,6 +286,7 @@ export function ProPanel() {
       const result = await generateBudget({
         clientName: ownDraft.client_name || 'Cliente', concept: ownDraft.concept,
         marginPercent: 20, proRates: professional.rates, userId: ownerId ?? undefined, knowledge,
+        professionalId: professional.id, orgId: professional.org_id,
       })
       setOwnLines(result.lines.map(l => ({ ...l })))
       if (result.notes && !ownDraft.notes.trim()) setOwnDraft(d => ({ ...d, notes: result.notes }))
