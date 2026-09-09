@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, LayoutGrid, Map, Calendar, Menu, X,
   DollarSign, HardHat, Users, Bell, Settings, LogOut, Radar,
-  Mail, FileText, Receipt,
+  Mail, FileText, Receipt, BookOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
@@ -19,6 +19,7 @@ const DRAWER_ITEMS = [
   { to: '/email-inbox',   icon: Mail,       label: 'Bandeja emails' },
   { to: '/finances',      icon: DollarSign, label: 'Finanzas' },
   { to: '/budgets',       icon: FileText,   label: 'Presupuestos' },
+  { to: '/budget-library',icon: BookOpen,   label: 'Biblioteca' },
   { to: '/invoices',      icon: Receipt,    label: 'Facturas' },
   { to: '/professionals', icon: HardHat,    label: 'Profesionales' },
   { to: '/team',          icon: Users,      label: 'Equipo' },

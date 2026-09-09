@@ -19,6 +19,7 @@ import { Professionals } from '@/pages/Professionals'
 import { Team } from '@/pages/Team'
 import { Notifications } from '@/pages/Notifications'
 import { EmailInbox } from '@/pages/EmailInbox'
+import { BudgetLibrary } from '@/pages/BudgetLibrary'
 import { Settings } from '@/pages/Settings'
 import { PublicLeadView } from '@/pages/PublicLeadView'
 import { ProPanel } from '@/pages/ProPanel'
@@ -140,6 +141,7 @@ function AppRoutes() {
         <Route path="/calendar"      element={<Calendar />} />
         <Route path="/finances"      element={<Finances />} />
         <Route path="/budgets"       element={<Budgets />} />
+        <Route path="/budget-library" element={<BudgetLibrary />} />
         <Route path="/invoices"      element={<Invoices />} />
         <Route path="/conversations" element={<Conversations />} />
         <Route path="/email-inbox"   element={<EmailInbox />} />

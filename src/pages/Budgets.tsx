@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { generateBudget, generateBudgetSplit, splitBudgetOptions, type AiImage } from '@/lib/ai'
-import { fetchProKnowledgeText } from '@/lib/proKnowledge'
+import { fetchGenerationKnowledge } from '@/lib/proKnowledge'
 import { exportBudgetPdf, viewBudgetPdf, exportBudgetComparison, type PdfOrgInfo } from '@/lib/budgetPdf'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
 import { Button } from '@/components/ui/button'
@@ -404,7 +404,7 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
     const pro = professionals.find(p => p.id === draft.professional_id)
     const zone = leads.find(l => l.id === draft.lead_id)?.zone ?? undefined
     const aiImages: AiImage[] = draft.images.map(i => ({ mime: i.mime, data: i.data }))
-    const knowledge = draft.professional_id ? await fetchProKnowledgeText(draft.professional_id) : ''
+    const knowledge = await fetchGenerationKnowledge(orgId, draft.professional_id)
     try {
       if (splitMode) {
         // Multi-gremio → varios presupuestos
