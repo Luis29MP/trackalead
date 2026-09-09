@@ -49,6 +49,13 @@ interface PanelBudget {
   notes: string | null; created_at: string; lead_name: string | null
 }
 
+// Presupuestos PROPIOS del profesional (trabajos suyos)
+interface OwnBudget {
+  id: string; client_name: string | null; concept: string | null
+  lines: BudgetLine[]; subtotal: number; vat_percent: number; total: number
+  notes: string | null; created_at: string
+}
+
 function groupProBudgets(budgets: PanelBudget[]): PanelBudget[][] {
   const seen = new Set<string>(); const out: PanelBudget[][] = []
   for (const b of budgets) {
@@ -125,6 +132,14 @@ export function ProPanel() {
   const [rates, setRates]                = useState<ProRate[]>([])
   const [savingRates, setSavingRates]    = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  // Mis presupuestos propios
+  const [ownBudgets, setOwnBudgets]      = useState<OwnBudget[]>([])
+  const [ownEditing, setOwnEditing]      = useState(false)
+  const [ownDraft, setOwnDraft]          = useState<{ id: string | null; client_name: string; concept: string; vat_percent: number; notes: string }>({ id: null, client_name: '', concept: '', vat_percent: 21, notes: '' })
+  const [ownLines, setOwnLines]          = useState<BudgetLine[]>([])
+  const [genOwn, setGenOwn]              = useState(false)
+  const [savingOwn, setSavingOwn]        = useState(false)
+  const [contributing, setContributing]  = useState(false)
 
   useEffect(() => {
     if (!token) { setNotFound(true); setLoading(false); return }
@@ -154,6 +169,8 @@ export function ProPanel() {
     setPartidas(d.partidas ?? [])
     const { data: bg } = await supabase.rpc('pro_budgets', { p_token: token })
     setBudgets((bg ?? []) as PanelBudget[])
+    const { data: ob } = await supabase.rpc('pro_own_budget_list', { p_token: token })
+    setOwnBudgets((ob ?? []) as OwnBudget[])
     return true
   }
 
@@ -164,15 +181,23 @@ export function ProPanel() {
     reload()
   }
 
-  // Texto de conocimiento del profesional (vía RPC, sin sesión)
+  // Texto de conocimiento para la IA: biblioteca de la empresa + conocimiento del profesional
   async function proKnowledgeText(): Promise<string> {
-    const { data } = await supabase.rpc('pro_knowledge_list', { p_token: token })
-    const items = (data ?? []) as { type: string; title: string | null; content_text: string | null }[]
+    const [{ data: lib }, { data: kn }] = await Promise.all([
+      supabase.rpc('pro_budget_library_list', { p_token: token }),
+      supabase.rpc('pro_knowledge_list', { p_token: token }),
+    ])
     let out = ''
-    for (const k of items) {
+    for (const k of (lib ?? []) as { title: string | null; gremio: string | null; content_text: string | null }[]) {
+      if (!k.content_text) continue
+      const chunk = `\n--- Presupuesto real${k.gremio ? ` (${k.gremio})` : ''}: ${k.title ?? ''} ---\n${k.content_text.slice(0, 3000)}`
+      if (out.length + chunk.length > 12000) break
+      out += chunk
+    }
+    for (const k of (kn ?? []) as { type: string; title: string | null; content_text: string | null }[]) {
       if (!k.content_text) continue
       const chunk = `\n--- ${k.type}: ${k.title ?? ''} ---\n${k.content_text.slice(0, 2500)}`
-      if (out.length + chunk.length > 8000) break
+      if (out.length + chunk.length > 16000) break
       out += chunk
     }
     return out.trim()
@@ -240,6 +265,69 @@ export function ProPanel() {
     } finally {
       setGeneratingBudget(false)
     }
+  }
+
+  // ── Mis presupuestos propios (trabajos del profesional, con IA) ──────────────
+  function openOwnNew() { setOwnDraft({ id: null, client_name: '', concept: '', vat_percent: 21, notes: '' }); setOwnLines([]); setOwnEditing(true) }
+  function openOwnEdit(b: OwnBudget) { setOwnDraft({ id: b.id, client_name: b.client_name ?? '', concept: b.concept ?? '', vat_percent: b.vat_percent ?? 21, notes: b.notes ?? '' }); setOwnLines((b.lines ?? []).map(l => ({ ...l }))); setOwnEditing(true) }
+  function updateOwnLine(i: number, patch: Partial<BudgetLine>) {
+    setOwnLines(prev => prev.map((l, idx) => { if (idx !== i) return l; const n = { ...l, ...patch }; n.total = Math.round((Number(n.units) || 0) * (Number(n.unit_price) || 0) * 100) / 100; return n }))
+  }
+  function addOwnLine() { setOwnLines(prev => [...prev, { concept: '', units: 1, unit_price: 0, total: 0 }]) }
+  function removeOwnLine(i: number) { setOwnLines(prev => prev.filter((_, idx) => idx !== i)) }
+  async function generateOwn() {
+    if (!professional) return
+    if (!ownDraft.concept.trim()) { toast.error('Describe el trabajo primero'); return }
+    setGenOwn(true)
+    try {
+      const knowledge = await proKnowledgeText()
+      const result = await generateBudget({
+        clientName: ownDraft.client_name || 'Cliente', concept: ownDraft.concept,
+        marginPercent: 20, proRates: professional.rates, userId: ownerId ?? undefined, knowledge,
+      })
+      setOwnLines(result.lines.map(l => ({ ...l })))
+      if (result.notes && !ownDraft.notes.trim()) setOwnDraft(d => ({ ...d, notes: result.notes }))
+      toast.success('Presupuesto generado — revísalo y guarda')
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al generar')
+    } finally { setGenOwn(false) }
+  }
+  async function saveOwn() {
+    setSavingOwn(true)
+    const subtotal = Math.round(ownLines.reduce((s, l) => s + (l.total || 0), 0) * 100) / 100
+    const total = Math.round((subtotal + subtotal * (ownDraft.vat_percent || 0) / 100) * 100) / 100
+    const { error } = await supabase.rpc('pro_own_budget_save', {
+      p_token: token, p_id: ownDraft.id, p_client_name: ownDraft.client_name || null, p_concept: ownDraft.concept || null,
+      p_lines: ownLines, p_subtotal: subtotal, p_vat: ownDraft.vat_percent, p_total: total, p_notes: ownDraft.notes || null,
+    })
+    setSavingOwn(false)
+    if (error) { toast.error('No se pudo guardar'); return }
+    toast.success('Presupuesto guardado'); setOwnEditing(false); await reload()
+  }
+  async function deleteOwn(id: string) {
+    if (!window.confirm('¿Borrar este presupuesto?')) return
+    await supabase.rpc('pro_own_budget_delete', { p_token: token, p_id: id }); reload()
+  }
+  function ownPdf(b: OwnBudget) {
+    const issuer = { name: professional?.company_name || professional?.name, phone: professional?.phone, email: professional?.email, address: professional?.address, logoUrl: professional?.logo_url }
+    const like = { id: b.id, client_name: b.client_name, client_phone: null, client_address: null, concept: b.concept, lines: b.lines, subtotal: b.subtotal, vat_percent: b.vat_percent, vat_amount: Math.round(b.subtotal * (b.vat_percent || 0)) / 100, total: b.total, notes: b.notes, created_at: b.created_at, validity_days: 30 }
+    viewBudgetPdf(like as unknown as Budget, issuer)
+  }
+
+  // El profesional aporta un presupuesto real a la biblioteca de la empresa
+  async function contributeToLibrary(file: File) {
+    setContributing(true)
+    try {
+      const { extractKnowledgeText } = await import('@/lib/extractText')
+      const text = await extractKnowledgeText(file)
+      if (text.trim().length < 50) { toast.error('No se pudo leer texto (¿foto/escaneo? súbelo en PDF con texto o Excel)'); return }
+      const { error } = await supabase.rpc('pro_budget_library_add', {
+        p_token: token, p_title: file.name, p_gremio: professional?.specialty ?? null, p_content_text: text.slice(0, 40000), p_file_url: null,
+      })
+      if (error) { toast.error('No se pudo aportar'); return }
+      toast.success('Añadido a la biblioteca de la empresa')
+    } catch { toast.error('No se pudo leer el archivo') }
+    finally { setContributing(false) }
   }
 
   function updatePartidaLine(i: number, patch: Partial<BudgetLine>) {
@@ -431,6 +519,75 @@ export function ProPanel() {
             <h3 className="text-sm font-bold text-gray-800">Mis ejemplos y documentos</h3>
             {professional && <ProKnowledgeManager professionalId={professional.id} orgId={professional.org_id} proToken={token} />}
           </div>
+
+          {/* Aportar a la biblioteca de la empresa */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-2">
+            <h3 className="text-sm font-bold text-gray-800">Aportar a la biblioteca de la empresa</h3>
+            <p className="text-xs text-gray-400">Sube presupuestos reales tuyos (PDF con texto, Excel o Word). Mejoran el motor para todos.</p>
+            <label className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 h-9 rounded-md border cursor-pointer text-gray-600 ${contributing ? 'opacity-60 pointer-events-none' : 'border-gray-200 hover:bg-gray-50'}`}>
+              <input type="file" accept=".pdf,.xlsx,.xls,.csv,.docx,.txt" className="hidden" disabled={contributing}
+                onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) contributeToLibrary(f) }} />
+              <Upload className="h-3.5 w-3.5" />{contributing ? 'Procesando…' : 'Subir presupuesto'}
+            </label>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (ownEditing) {
+    const sub = ownLines.reduce((s, l) => s + (l.total || 0), 0)
+    const vatAmt = Math.round(sub * (ownDraft.vat_percent || 0)) / 100
+    const tot = Math.round((sub + vatAmt) * 100) / 100
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col">
+        <Header proName={professional?.name} />
+        <div className="max-w-lg mx-auto w-full px-4 py-6 space-y-4">
+          <button onClick={() => setOwnEditing(false)} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800"><ArrowLeft className="h-4 w-4" />Volver</button>
+
+          <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-3">
+            <h2 className="text-lg font-bold text-gray-900">{ownDraft.id ? 'Editar presupuesto' : 'Nuevo presupuesto'}</h2>
+            <p className="text-xs text-gray-400">Para tus propios trabajos. La IA usa tus tarifas y la biblioteca de la empresa.</p>
+            <div className="space-y-1.5">
+              <label className="text-xs text-gray-500">Cliente</label>
+              <Input value={ownDraft.client_name} onChange={e => setOwnDraft(d => ({ ...d, client_name: e.target.value }))} placeholder="Nombre del cliente" className="h-10" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-gray-500">Trabajo a presupuestar</label>
+              <Textarea rows={3} value={ownDraft.concept} onChange={e => setOwnDraft(d => ({ ...d, concept: e.target.value }))} placeholder="Describe el trabajo: p. ej. Cambiar 3 radiadores y purgar el circuito en piso de 90 m²…" />
+            </div>
+            <Button className="w-full gap-1.5" onClick={generateOwn} disabled={genOwn}><Sparkles className="h-4 w-4" />{genOwn ? 'Generando…' : 'Generar con IA'}</Button>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-2">
+            <h3 className="text-sm font-bold text-gray-800">Líneas del presupuesto</h3>
+            {ownLines.length === 0 && <p className="text-xs text-gray-400">Genera con IA o añade líneas a mano.</p>}
+            {ownLines.map((l, i) => (
+              <div key={i} className="border border-gray-100 rounded-lg p-2 space-y-1.5">
+                <Input value={l.concept} onChange={e => updateOwnLine(i, { concept: e.target.value })} placeholder="Concepto" className="h-9 text-sm" />
+                <div className="flex items-center gap-2">
+                  <Input type="number" min={0} value={l.units} onChange={e => updateOwnLine(i, { units: Number(e.target.value) })} className="h-9 text-sm w-16 text-center" />
+                  <span className="text-xs text-gray-400">×</span>
+                  <Input type="number" min={0} step="0.01" value={l.unit_price} onChange={e => updateOwnLine(i, { unit_price: Number(e.target.value) })} className="h-9 text-sm w-24 text-right" />
+                  <span className="ml-auto text-sm font-semibold">{formatCurrency(l.total)}</span>
+                  <button onClick={() => removeOwnLine(i)} className="text-red-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                </div>
+              </div>
+            ))}
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={addOwnLine} className="gap-1.5"><Plus className="h-3.5 w-3.5" />Añadir línea</Button>
+              <label className="text-xs text-gray-500 ml-auto flex items-center gap-1.5">IVA %
+                <Input type="number" min={0} value={ownDraft.vat_percent} onChange={e => setOwnDraft(d => ({ ...d, vat_percent: Number(e.target.value) }))} className="h-8 w-16 text-right text-sm" />
+              </label>
+            </div>
+            <div className="border-t border-gray-100 pt-2 space-y-1 text-sm">
+              <div className="flex justify-between text-gray-500"><span>Subtotal</span><span>{formatCurrency(sub)}</span></div>
+              <div className="flex justify-between text-gray-500"><span>IVA ({ownDraft.vat_percent}%)</span><span>{formatCurrency(vatAmt)}</span></div>
+              <div className="flex justify-between font-bold text-primary-600"><span>Total</span><span>{formatCurrency(tot)}</span></div>
+            </div>
+          </div>
+
+          <Button className="w-full" onClick={saveOwn} disabled={savingOwn || ownLines.length === 0}>{savingOwn ? 'Guardando…' : 'Guardar presupuesto'}</Button>
         </div>
       </div>
     )
@@ -620,6 +777,33 @@ export function ProPanel() {
             ))}
           </div>
         )}
+
+        {/* Mis presupuestos propios (trabajos del profesional) */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Sparkles className="h-5 w-5 text-primary-600" />Mis presupuestos</h2>
+              <p className="text-sm text-gray-400">Para tus propios trabajos, con IA</p>
+            </div>
+            <Button size="sm" className="gap-1.5 shrink-0" onClick={openOwnNew}><Plus className="h-4 w-4" />Nuevo</Button>
+          </div>
+          {ownBudgets.map(b => (
+            <div key={b.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-semibold text-gray-900 truncate">{b.client_name || 'Cliente'}</p>
+                  <p className="text-sm text-gray-500 truncate">{b.concept || ''}</p>
+                </div>
+                <span className="text-sm font-bold text-gray-900 shrink-0">{formatCurrency(b.total)}</span>
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => ownPdf(b)}><Eye className="h-4 w-4" />PDF</Button>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openOwnEdit(b)}><Settings className="h-4 w-4" />Editar</Button>
+                <button onClick={() => deleteOwn(b.id)} className="text-red-400 hover:text-red-600 ml-auto"><Trash2 className="h-4 w-4" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
 
         <div>
           <h2 className="text-lg font-bold text-gray-900">Mis trabajos asignados</h2>
