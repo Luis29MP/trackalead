@@ -139,7 +139,11 @@ export function Budgets() {
     setProfessionals((prosData ?? []) as Professional[])
     setOwnBudgets((own ?? []) as typeof ownBudgets)
     const map: Record<string, string> = {}
-    for (const m of (mem ?? []) as { user_id: string; profile: { full_name: string | null } | null }[]) if (m.user_id) map[m.user_id] = m.profile?.full_name ?? 'Equipo'
+    for (const m of (mem ?? []) as unknown as { user_id: string; profile: { full_name: string | null } | { full_name: string | null }[] | null }[]) {
+      if (!m.user_id) continue
+      const prof = Array.isArray(m.profile) ? m.profile[0] : m.profile
+      map[m.user_id] = prof?.full_name ?? 'Equipo'
+    }
     setMemberMap(map)
   }
 
