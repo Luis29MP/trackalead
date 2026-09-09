@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { getTextScale, setTextScale, type TextScale } from '@/lib/textScale'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -438,6 +439,8 @@ export function Settings() {
               </Button>
             </CardContent>
           </Card>
+
+          <TextSizeCard />
         </TabsContent>
 
         {/* ── SEGURIDAD ────────────────────────────────────────────────────── */}
@@ -544,5 +547,39 @@ export function Settings() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+// Tamaño de letra por dispositivo (localStorage). No afecta a otros usuarios.
+function TextSizeCard() {
+  const [scale, setScale] = useState<TextScale>(() => getTextScale())
+  const OPTS: { v: TextScale; label: string; px: string }[] = [
+    { v: 'normal', label: 'Normal',     px: '16px' },
+    { v: 'grande', label: 'Grande',     px: '19px' },
+    { v: 'xl',     label: 'Muy grande', px: '22px' },
+  ]
+  function pick(v: TextScale) { setScale(v); setTextScale(v) }
+  return (
+    <Card>
+      <CardHeader className="pb-3"><CardTitle className="text-sm">Tamaño de letra</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-[11px] text-gray-400">
+          Ajusta el tamaño del texto en <strong>este dispositivo</strong> (móvil, tablet u ordenador). Es una preferencia tuya: no cambia lo que ven los demás ni en otros dispositivos.
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          {OPTS.map(o => (
+            <button
+              key={o.v}
+              type="button"
+              onClick={() => pick(o.v)}
+              className={`rounded-lg border p-3 text-center transition-colors ${scale === o.v ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-gray-200 hover:border-gray-300'}`}
+            >
+              <span style={{ fontSize: o.px }} className="block font-bold text-gray-800 leading-none">Aa</span>
+              <span className="text-xs text-gray-500 mt-2 block">{o.label}</span>
+            </button>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
