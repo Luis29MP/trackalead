@@ -204,7 +204,6 @@ export function Settings() {
           <TabsTrigger value="ai"><Sparkles className="h-3.5 w-3.5 mr-1.5" />Integraciones IA</TabsTrigger>
           <TabsTrigger value="biblioteca"><BookOpen className="h-3.5 w-3.5 mr-1.5" />Biblioteca</TabsTrigger>
           <TabsTrigger value="integrations"><Plug className="h-3.5 w-3.5 mr-1.5" />Integraciones</TabsTrigger>
-          <TabsTrigger value="api"><Globe className="h-3.5 w-3.5 mr-1.5" />API</TabsTrigger>
         </TabsList>
 
         {/* ── ORGANIZACIONES ───────────────────────────────────────────────── */}
@@ -492,47 +491,6 @@ export function Settings() {
           <Integrations />
         </TabsContent>
 
-        {/* ── API / WEBHOOK ────────────────────────────────────────────────── */}
-        <TabsContent value="api" className="space-y-5">
-          <Card>
-            <CardHeader className="pb-3"><CardTitle className="text-sm">Webhook — Recepción de leads</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-gray-600">
-                Conecta cualquier formulario web para que los leads entren directamente en el tablero que elijas.
-              </p>
-              <div>
-                <p className="text-xs font-semibold text-gray-500 mb-1.5">Endpoint</p>
-                <div className="bg-slate-900 rounded-lg px-4 py-2.5">
-                  <code className="text-xs text-green-400">POST https://qplznujisnpwyhrjjuyp.supabase.co/functions/v1/ingest-lead</code>
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-gray-500 mb-1.5">Headers</p>
-                <div className="bg-slate-900 rounded-lg px-4 py-2.5 space-y-1">
-                  <code className="text-xs text-slate-400 block">Authorization: Bearer YOUR_SECRET_TOKEN</code>
-                  <code className="text-xs text-slate-400 block">Content-Type: application/json</code>
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-gray-500 mb-1.5">Body JSON</p>
-                <div className="bg-slate-900 rounded-lg px-4 py-3">
-                  <pre className="text-xs text-green-400 font-mono leading-relaxed">{`{
-  "board_id": "uuid-de-tu-tablero",
-  "name":     "Juan García",
-  "phone":    "600000000",
-  "email":    "juan@email.com",
-  "address":  "Calle Mayor 1, Madrid",
-  "source":   "form",
-  "notes":    "Interesado en reforma cocina"
-}`}</pre>
-                </div>
-              </div>
-              <p className="text-xs text-gray-400">
-                El lead se crea automáticamente en la columna "Nuevo" del tablero indicado.
-              </p>
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
 
       {/* Confirm delete dialog */}
