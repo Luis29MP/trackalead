@@ -214,6 +214,7 @@ export interface BudgetLine {
   unit_price: number
   total: number
   internal?: boolean   // línea interna: no se muestra en el PDF del cliente
+  uds_label?: string   // texto de unidades tal cual del original (ej. "60 m²", "3 d.")
 }
 
 // Partida (gremio) de un presupuesto, asignable a un profesional

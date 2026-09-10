@@ -461,3 +461,91 @@ export async function extractProfessionalFromDocument(input: { text?: string; im
     rates,
   }
 }
+
+// ── Importar presupuesto de profesional: extracción FIEL de líneas + cliente ─────
+export interface ExtractedBudgetLine { concept: string; uds: string; total: number }
+export interface ExtractedBudgetSection { title: string | null; lines: ExtractedBudgetLine[] }
+export interface ExtractedBudget {
+  client: { name: string; id_number: string; address: string }
+  sections: ExtractedBudgetSection[]
+}
+
+const BUDGET_EXTRACT_SYSTEM = `Eres un asistente que extrae la información estructurada de un presupuesto de un profesional de reformas/servicios del hogar en España, a partir de su documento.
+
+Devuelve SOLO JSON válido, sin markdown ni texto adicional:
+{
+  "client": { "name": "", "id_number": "", "address": "" },
+  "sections": [
+    { "title": null, "lines": [ { "concept": "", "uds": "", "total": 0 } ] }
+  ]
+}
+
+REGLAS:
+- Copia cada "concept" EXACTAMENTE como aparece en el documento, sin resumir, generalizar ni reformular. El cliente final debe reconocer el mismo trabajo que le describió el profesional.
+- "uds" es solo la cantidad/unidad tal cual (ej. "60 m2", "3 d.", "2", o "-"). NUNCA incluyas el precio unitario en "uds".
+- "total" es el importe original de esa línea tal cual figura en el documento, SIN aplicar ningún margen ni comisión (número, sin símbolo de euro).
+- Si el documento separa mano de obra de materiales, represéntalo como secciones distintas con su propio "title". Si no hay separación, usa una única sección con "title": null.
+- No incluyas líneas de subtotal, IVA o total del documento original.
+- Si falta algún dato del cliente, devuelve "" — nunca inventes datos.
+- NO extraigas datos del profesional (ya los tenemos de su ficha) ni la fecha del documento — la fecha del presupuesto final es siempre la de hoy.`
+
+// Extrae el presupuesto de un profesional (cliente + partidas) de forma fiel, para
+// reconstruirlo con comisión. NO calcula dinero con margen (eso se hace en el frontend).
+export async function extractBudgetDocument(input: { text?: string; images?: AiImage[] }): Promise<ExtractedBudget> {
+  const { supabase } = await import('./supabase')
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('No hay usuario para la IA')
+
+  const text = (input.text ?? '').trim()
+  const images = input.images ?? []
+  if (!text && !images.length) throw new Error('No se pudo leer contenido del documento')
+
+  const prompt = text
+    ? `Documento (presupuesto del profesional):\n\n${text.slice(0, 40000)}`
+    : 'Analiza las imágenes adjuntas: es el presupuesto de un profesional.'
+
+  const { data, error } = await supabase.functions.invoke('ai-proxy', {
+    body: { user_id: user.id, prompt, system: BUDGET_EXTRACT_SYSTEM, max_tokens: 4000, web_search: false, images, label: 'budget_import' },
+  })
+  if (error) {
+    let detail = error.message
+    try {
+      const ctx = (error as { context?: Response }).context
+      if (ctx && typeof ctx.json === 'function') {
+        const b = await ctx.json()
+        if (Array.isArray(b?.details) && b.details.length) detail = b.details.join(' | ')
+        else if (b?.error) detail = b.error
+      }
+    } catch { /* sin cuerpo */ }
+    throw new Error(`Error de la IA: ${detail}`)
+  }
+  if (data?.error) throw new Error(data.error)
+
+  const obj = extractJson(data?.text ?? '') as Record<string, unknown> | null
+  if (!obj || typeof obj !== 'object') throw new Error('La IA no devolvió un JSON válido')
+
+  const c = (obj.client ?? {}) as Record<string, unknown>
+  const sectionsRaw = Array.isArray(obj.sections) ? obj.sections : []
+  const sections: ExtractedBudgetSection[] = sectionsRaw.map((s) => {
+    const so = (s ?? {}) as Record<string, unknown>
+    const linesRaw = Array.isArray(so.lines) ? so.lines : []
+    const lines: ExtractedBudgetLine[] = linesRaw.map((l) => {
+      const lo = (l ?? {}) as Record<string, unknown>
+      return {
+        concept: String(lo.concept ?? '').trim(),
+        uds: String(lo.uds ?? '').trim() || '-',
+        total: Number(String(lo.total ?? '').replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(',', '.')) || 0,
+      }
+    }).filter(l => l.concept)
+    return { title: so.title != null ? String(so.title).trim() || null : null, lines }
+  }).filter(s => s.lines.length)
+
+  return {
+    client: {
+      name: String(c.name ?? '').trim(),
+      id_number: String(c.id_number ?? c.dni ?? c.nif ?? '').trim(),
+      address: String(c.address ?? '').trim(),
+    },
+    sections,
+  }
+}

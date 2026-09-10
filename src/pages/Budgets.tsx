@@ -11,6 +11,7 @@ import { generateBudget, generateBudgetSplit, splitBudgetOptions, type AiImage }
 import { fetchGenerationKnowledge } from '@/lib/proKnowledge'
 import { exportBudgetPdf, viewBudgetPdf, exportBudgetComparison, toClientBudget, type PdfOrgInfo } from '@/lib/budgetPdf'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
+import { ImportProBudget } from '@/components/ImportProBudget'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -112,6 +113,7 @@ export function Budgets() {
   const [confirmApprove, setConfirmApprove] = useState<Budget | null>(null)
   const [approving, setApproving] = useState(false)
   const [marginBudget, setMarginBudget] = useState<Budget | null>(null)
+  const [importProOpen, setImportProOpen] = useState(false)
   const [ownBudgets, setOwnBudgets] = useState<{ id: string; professional_id: string; client_name: string | null; concept: string | null; lines: BudgetLine[]; subtotal: number; vat_percent: number; total: number; notes: string | null; created_at: string }[]>([])
   const [memberMap, setMemberMap] = useState<Record<string, string>>({})
 
@@ -233,14 +235,19 @@ export function Budgets() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Presupuestos</h1>
-          <p className="text-gray-500 text-sm mt-1">Genera presupuestos profesionales con IA</p>
+          <p className="text-gray-500 text-sm mt-1">Crea, importa y gestiona tus presupuestos</p>
         </div>
-        <Button onClick={openNew} className="gap-1.5">
-          <Sparkles className="h-4 w-4" />Generar presupuesto con IA
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={openNew} className="gap-1.5">
+            <Sparkles className="h-4 w-4" />Crear presupuesto
+          </Button>
+          <Button variant="outline" onClick={() => setImportProOpen(true)} className="gap-1.5">
+            <Download className="h-4 w-4" />Importar de profesional
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -249,8 +256,7 @@ export function Budgets() {
         <div className="text-center py-16">
           <FileText className="h-12 w-12 mx-auto text-gray-300 mb-4" />
           <h3 className="text-lg font-medium text-gray-900">Sin presupuestos</h3>
-          <p className="text-gray-500 text-sm mt-1">Genera tu primer presupuesto con IA a partir de un lead</p>
-          <Button className="mt-4 gap-1.5" onClick={openNew}><Sparkles className="h-4 w-4" />Generar presupuesto con IA</Button>
+          <p className="text-gray-500 text-sm mt-1">Usa <strong>Crear presupuesto</strong> (con IA) o <strong>Importar de profesional</strong> arriba.</p>
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -347,6 +353,17 @@ export function Budgets() {
           orgName={organization?.name}
           onClose={() => setMarginBudget(null)}
           onSaved={() => { loadBudgets(); setMarginBudget(null) }}
+        />
+      )}
+
+      {importProOpen && (
+        <ImportProBudget
+          professionals={professionals}
+          leads={leads}
+          orgId={organization!.id}
+          userId={user?.id ?? null}
+          onClose={() => setImportProOpen(false)}
+          onSaved={() => { loadBudgets(); loadLeadsAndPros(); setImportProOpen(false) }}
         />
       )}
 

@@ -106,8 +106,8 @@ function buildDoc(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: 
     startY: y,
     head: [hideUP ? ['Concepto', 'Uds.', 'Total'] : ['Concepto', 'Uds.', 'Precio/ud', 'Total']],
     body: budget.lines.map(l => hideUP
-      ? [l.concept, String(l.units), eur(l.total)]
-      : [l.concept, String(l.units), eur(l.unit_price), eur(l.total)]),
+      ? [l.concept, l.uds_label ?? String(l.units), eur(l.total)]
+      : [l.concept, l.uds_label ?? String(l.units), eur(l.unit_price), eur(l.total)]),
     theme: 'striped',
     headStyles: { fillColor: PRIMARY, textColor: 255, fontStyle: 'bold', halign: 'left' },
     bodyStyles: { textColor: 40, fontSize: 9 },
