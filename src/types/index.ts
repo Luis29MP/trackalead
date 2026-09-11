@@ -166,6 +166,8 @@ export interface Professional {
   address?: string | null
   cif?: string | null
   logo_url?: string | null    // data URL (base64) del logo
+  budget_template_url?: string | null    // PDF de referencia de su modelo de presupuesto
+  budget_template_notes?: string | null  // notas de formato para sus presupuestos
 }
 
 export type BudgetStatus = 'draft' | 'sent' | 'accepted' | 'rejected'
@@ -215,6 +217,7 @@ export interface BudgetLine {
   total: number
   internal?: boolean   // línea interna: no se muestra en el PDF del cliente
   uds_label?: string   // texto de unidades tal cual del original (ej. "60 m²", "3 d.")
+  section?: string     // sección/apartado del original (ej. "Materiales"); vacío = trabajo principal
 }
 
 // Partida (gremio) de un presupuesto, asignable a un profesional
@@ -243,6 +246,7 @@ export interface Budget {
   client_name: string | null
   client_phone: string | null
   client_address: string | null
+  client_nif?: string | null
   concept: string | null
   lines: BudgetLine[]
   subtotal: number

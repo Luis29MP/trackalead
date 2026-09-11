@@ -82,90 +82,105 @@ function buildDoc(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: 
   doc.line(marginX, y, pageW - marginX, y)
   y += 8
 
-  // ── Datos del cliente ────────────────────────────────────────────────────────
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(10)
-  doc.setTextColor(...DARK)
-  doc.text('CLIENTE', marginX, y)
-  y += 5
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9.5)
-  doc.setTextColor(60, 60, 60)
-  const clientLines = [
-    budget.client_name || '—',
-    budget.client_phone || null,
-    budget.client_address || null,
-    budget.concept ? `Trabajo: ${budget.concept}` : null,
-  ].filter(Boolean) as string[]
-  clientLines.forEach((line, i) => doc.text(line, marginX, y + i * 4.8))
-  y += clientLines.length * 4.8 + 4
+  // ── Datos del cliente (en caja) ──────────────────────────────────────────────
+  const boxPad = 3.5
+  const clientRows = [
+    ['Nombre:', budget.client_name || '—'],
+    budget.client_nif ? ['DNI/NIF:', budget.client_nif] : null,
+    budget.client_address ? ['Dirección:', budget.client_address] : null,
+    budget.concept ? ['Trabajo:', budget.concept] : null,
+  ].filter(Boolean) as [string, string][]
+  const boxH = 7 + clientRows.length * 4.8 + boxPad
+  doc.setFillColor(245, 247, 250)
+  doc.roundedRect(marginX, y, pageW - marginX * 2, boxH, 1.5, 1.5, 'F')
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...GRAY)
+  doc.text('DATOS DEL CLIENTE', marginX + boxPad, y + 5)
+  let cy = y + 11
+  doc.setFontSize(9.2)
+  for (const [k, v] of clientRows) {
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(...DARK); doc.text(k, marginX + boxPad, cy)
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(60, 60, 60)
+    doc.text(doc.splitTextToSize(v, pageW - marginX * 2 - boxPad * 2 - 24), marginX + boxPad + 24, cy)
+    cy += 4.8
+  }
+  y += boxH + 8
 
-  // ── Tabla de líneas ──────────────────────────────────────────────────────────
+  // ── Tablas por sección (trabajo / Materiales / …) ─────────────────────────────
   const hideUP = !!opts.hideUnitPrice
-  autoTable(doc, {
-    startY: y,
-    head: [hideUP ? ['Concepto', 'Uds.', 'Total'] : ['Concepto', 'Uds.', 'Precio/ud', 'Total']],
-    body: budget.lines.map(l => hideUP
-      ? [l.concept, l.uds_label ?? String(l.units), eur(l.total)]
-      : [l.concept, l.uds_label ?? String(l.units), eur(l.unit_price), eur(l.total)]),
-    theme: 'striped',
-    headStyles: { fillColor: PRIMARY, textColor: 255, fontStyle: 'bold', halign: 'left' },
-    bodyStyles: { textColor: 40, fontSize: 9 },
-    columnStyles: hideUP
-      ? { 0: { cellWidth: 'auto' }, 1: { halign: 'center', cellWidth: 20 }, 2: { halign: 'right', cellWidth: 32, fontStyle: 'bold' } }
-      : { 0: { cellWidth: 'auto' }, 1: { halign: 'center', cellWidth: 18 }, 2: { halign: 'right', cellWidth: 30 }, 3: { halign: 'right', cellWidth: 30, fontStyle: 'bold' } },
-    margin: { left: marginX, right: marginX },
+  const groups: { title: string | null; lines: typeof budget.lines }[] = []
+  for (const l of budget.lines) {
+    const key = l.section || null
+    let g = groups.find(x => x.title === key)
+    if (!g) { g = { title: key, lines: [] }; groups.push(g) }
+    g.lines.push(l)
+  }
+  let afterY = y
+  groups.forEach((g) => {
+    if (g.title) {
+      afterY += 2
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...DARK)
+      doc.text(g.title, pageW / 2, afterY + 4, { align: 'center' })
+      afterY += 7
+    }
+    autoTable(doc, {
+      startY: afterY,
+      head: [hideUP ? ['Concepto', 'Uds.', 'Total'] : ['Concepto', 'Uds.', 'Precio/ud', 'Total']],
+      body: g.lines.map(l => hideUP
+        ? [l.concept, l.uds_label ?? String(l.units), eur(l.total)]
+        : [l.concept, l.uds_label ?? String(l.units), eur(l.unit_price), eur(l.total)]),
+      theme: 'striped',
+      headStyles: { fillColor: DARK, textColor: 255, fontStyle: 'bold', halign: 'left' },
+      bodyStyles: { textColor: 40, fontSize: 9 },
+      columnStyles: hideUP
+        ? { 0: { cellWidth: 'auto' }, 1: { halign: 'center', cellWidth: 20 }, 2: { halign: 'right', cellWidth: 32, fontStyle: 'bold' } }
+        : { 0: { cellWidth: 'auto' }, 1: { halign: 'center', cellWidth: 18 }, 2: { halign: 'right', cellWidth: 30 }, 3: { halign: 'right', cellWidth: 30, fontStyle: 'bold' } },
+      margin: { left: marginX, right: marginX },
+    })
+    // @ts-expect-error lastAutoTable lo añade el plugin en runtime
+    afterY = (doc.lastAutoTable?.finalY ?? afterY) + 6
   })
 
-  // @ts-expect-error lastAutoTable lo añade el plugin en runtime
-  let afterY: number = doc.lastAutoTable?.finalY ?? y + 20
-  afterY += 8
+  // ── Resumen: subtotales por sección + Subtotal + IVA + TOTAL ───────────────────
+  const rowsX = marginX, valuesX = pageW - marginX
+  const sumRow = (label: string, value: string, o: { bold?: boolean; color?: [number, number, number]; rule?: boolean } = {}) => {
+    if (o.rule) { doc.setDrawColor(...PRIMARY); doc.setLineWidth(0.4); doc.line(rowsX, afterY - 2, valuesX, afterY - 2) }
+    doc.setFont('helvetica', o.bold ? 'bold' : 'normal')
+    doc.setFontSize(o.bold ? 11.5 : 9.5)
+    const c = o.color ?? ([80, 80, 80] as [number, number, number])
+    doc.setTextColor(c[0], c[1], c[2])
+    doc.text(label, rowsX, afterY)
+    doc.text(value, valuesX, afterY, { align: 'right' })
+    afterY += o.bold ? 7.5 : 5.4
+  }
+  afterY += 3
+  if (groups.length > 1) {
+    for (const g of groups) sumRow(`${g.title || 'Trabajo'}:`, eur(g.lines.reduce((s, l) => s + (l.total || 0), 0)))
+    afterY += 1.5
+  }
+  sumRow('Subtotal', eur(budget.subtotal))
+  sumRow(`IVA (${budget.vat_percent}%)`, eur(budget.vat_amount))
+  sumRow('TOTAL PRESUPUESTO', eur(budget.total), { bold: true, color: PRIMARY, rule: true })
 
-  // ── Totales (alineados a la derecha) ─────────────────────────────────────────
-  const totalsX = pageW - marginX - 60
-  const valuesX = pageW - marginX
-  doc.setFontSize(9.5)
-  doc.setFont('helvetica', 'normal')
-  doc.setTextColor(...GRAY)
-  doc.text('Subtotal', totalsX, afterY)
-  doc.setTextColor(40, 40, 40)
-  doc.text(eur(budget.subtotal), valuesX, afterY, { align: 'right' })
-
-  afterY += 5.5
-  doc.setTextColor(...GRAY)
-  doc.text(`IVA (${budget.vat_percent}%)`, totalsX, afterY)
-  doc.setTextColor(40, 40, 40)
-  doc.text(eur(budget.vat_amount), valuesX, afterY, { align: 'right' })
-
-  afterY += 4
-  doc.setDrawColor(...PRIMARY)
-  doc.setLineWidth(0.4)
-  doc.line(totalsX, afterY, valuesX, afterY)
-  afterY += 6
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(12)
-  doc.setTextColor(...PRIMARY)
-  doc.text('TOTAL', totalsX, afterY)
-  doc.text(eur(budget.total), valuesX, afterY, { align: 'right' })
-
+  // ── Condiciones / validez ─────────────────────────────────────────────────────
+  afterY += 5
+  const safeNotes = sanitizeClientNotes(budget.notes ?? '')
+  if (safeNotes) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(80, 80, 80)
+    const condLines = doc.splitTextToSize(safeNotes, pageW - marginX * 2)
+    doc.text(condLines, marginX, afterY); afterY += condLines.length * 4.2 + 2
+  }
+  doc.setFontSize(8.5); doc.setTextColor(...GRAY)
+  doc.text(`Validez del presupuesto: ${budget.validity_days} días`, marginX, afterY)
   afterY += 12
 
-  // ── Condiciones y validez ────────────────────────────────────────────────────
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(9.5)
-  doc.setTextColor(...DARK)
-  doc.text('CONDICIONES', marginX, afterY)
-  afterY += 5
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8.5)
-  doc.setTextColor(80, 80, 80)
-  const safeNotes = sanitizeClientNotes(budget.notes ?? '')
-  const conditions = safeNotes || 'Presupuesto sin compromiso. Precios sujetos a revisión tras visita técnica.'
-  const condLines = doc.splitTextToSize(conditions, pageW - marginX * 2)
-  doc.text(condLines, marginX, afterY)
-  afterY += condLines.length * 4.2 + 3
-  doc.setTextColor(...GRAY)
-  doc.text(`Validez del presupuesto: ${budget.validity_days} días`, marginX, afterY)
+  // ── Aceptación del presupuesto ─────────────────────────────────────────────────
+  const pageHt = doc.internal.pageSize.getHeight()
+  if (afterY > pageHt - 40) { doc.addPage(); afterY = 20 }
+  doc.setDrawColor(220, 220, 220); doc.setLineWidth(0.3); doc.line(marginX, afterY, pageW - marginX, afterY); afterY += 6
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...DARK)
+  doc.text('ACEPTACIÓN DEL PRESUPUESTO:', marginX, afterY); afterY += 11
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(80, 80, 80)
+  doc.text('EL CLIENTE, FECHA: ______________________________', marginX, afterY)
 
   // ── Pie de página ────────────────────────────────────────────────────────────
   const pageH = doc.internal.pageSize.getHeight()

@@ -8,6 +8,8 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { viewBudgetPdf } from '@/lib/budgetPdf'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -23,10 +25,12 @@ interface ProForm {
   name: string; phone: string; email: string; specialty: string
   is_active: boolean; app_access: boolean; rates: ProRate[]
   company_name: string; address: string; cif: string; logo_url: string
+  budget_template_url: string; budget_template_notes: string
 }
 const EMPTY: ProForm = {
   name: '', phone: '', email: '', specialty: '', is_active: true, app_access: false, rates: [],
   company_name: '', address: '', cif: '', logo_url: '',
+  budget_template_url: '', budget_template_notes: '',
 }
 
 // Redimensiona una imagen a máx. 1500px y devuelve base64 JPEG (para la visión de la IA)
@@ -144,11 +148,37 @@ export function Professionals() {
       name: p.name, phone: p.phone ?? '', email: p.email ?? '', specialty: p.specialty ?? '',
       is_active: p.is_active, app_access: p.app_access, rates: p.rates ?? [],
       company_name: p.company_name ?? '', address: p.address ?? '', cif: p.cif ?? '', logo_url: p.logo_url ?? '',
+      budget_template_url: p.budget_template_url ?? '', budget_template_notes: p.budget_template_notes ?? '',
     })
     // No mostrar la pantalla del enlace al editar: el formulario manda. El enlace
     // se ve dentro del formulario (sección "Acceso a la app").
     setMagicLink('')
     setDialog(true)
+  }
+
+  // Genera un PDF de ejemplo con el membrete de este profesional (su "modelo de presupuesto")
+  function previewProTemplate() {
+    const issuer = {
+      name: form.company_name || form.name || 'Profesional',
+      phone: form.phone || null, email: form.email || null,
+      address: [form.address, form.cif ? `NIF: ${form.cif}` : null].filter(Boolean).join('  ·  ') || null,
+      logoUrl: form.logo_url || null,
+    }
+    const now = new Date().toISOString()
+    const sample = {
+      id: 'ejemplo0', org_id: organization?.id ?? '', lead_id: null, created_by: null,
+      client_name: 'Cliente de ejemplo', client_phone: '600 000 000',
+      client_address: 'C. Ejemplo 1, León', client_nif: '00000000A', concept: 'Trabajo de ejemplo',
+      lines: [
+        { concept: 'Reparación y preparación de superficies', units: 1, unit_price: 500, total: 500, uds_label: '-' },
+        { concept: 'Pintura de fachada', units: 1, unit_price: 1200, total: 1200, uds_label: '80 m2' },
+        { concept: 'Pintura', units: 1, unit_price: 300, total: 300, uds_label: '-', section: 'Materiales' },
+      ],
+      subtotal: 2000, vat_percent: 21, vat_amount: 420, total: 2420,
+      margin_percent: 0, validity_days: 30, notes: null, status: 'draft', ai_generated: false,
+      created_at: now, updated_at: now,
+    }
+    viewBudgetPdf(sample as unknown as Budget, issuer, { hideUnitPrice: true })
   }
 
   async function handleSave() {
@@ -162,6 +192,7 @@ export function Professionals() {
           rates: form.rates,
           company_name: form.company_name || null, address: form.address || null,
           cif: form.cif || null, logo_url: form.logo_url || null,
+          budget_template_url: form.budget_template_url || null, budget_template_notes: form.budget_template_notes || null,
         }).eq('id', editing.id).select().single()
         if (data?.app_access && data.magic_token) {
           setMagicLink(`${window.location.origin}/pro/${data.magic_token}`)
@@ -175,6 +206,7 @@ export function Professionals() {
           rates: form.rates,
           company_name: form.company_name || null, address: form.address || null,
           cif: form.cif || null, logo_url: form.logo_url || null,
+          budget_template_url: form.budget_template_url || null, budget_template_notes: form.budget_template_notes || null,
         }).select().single()
         if (data?.app_access && data.magic_token) {
           setMagicLink(`${window.location.origin}/pro/${data.magic_token}`)
@@ -568,6 +600,40 @@ export function Professionals() {
                         )}
                         <p className="text-[11px] text-gray-400 flex-1">Si lo subes, los presupuestos asignados a este profesional saldrán con su logo y datos de empresa.</p>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Modelo de presupuesto */}
+                  <div className="border-t border-gray-100 pt-3 space-y-3">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Modelo de presupuesto</p>
+                    <p className="text-[11px] text-gray-400">Así se generan sus presupuestos (con su membrete, secciones y bloque de aceptación). Ve un ejemplo o guarda su PDF de referencia.</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={previewProTemplate}><Eye className="h-3.5 w-3.5" />Ver ejemplo</Button>
+                      <label className="inline-flex items-center gap-1.5 text-xs px-3 h-9 rounded-md border border-gray-200 cursor-pointer hover:bg-gray-50 text-gray-600">
+                        <input type="file" accept=".pdf" className="hidden" onChange={async e => {
+                          const file = e.target.files?.[0]; e.target.value = ''
+                          if (!file || !organization) return
+                          try {
+                            const path = `pro-templates/${organization.id}/${Date.now()}-${file.name}`
+                            const { data: up, error } = await supabase.storage.from('lead-files').upload(path, file, { upsert: true })
+                            if (error || !up) throw error
+                            const url = supabase.storage.from('lead-files').getPublicUrl(up.path).data.publicUrl
+                            setForm(f => ({ ...f, budget_template_url: url }))
+                            toast.success('Modelo de referencia guardado')
+                          } catch { toast.error('No se pudo subir el modelo') }
+                        }} />
+                        <Upload className="h-3.5 w-3.5" />Subir PDF de referencia
+                      </label>
+                      {form.budget_template_url && (
+                        <span className="inline-flex items-center gap-1 text-xs text-primary-600">
+                          <a href={form.budget_template_url} target="_blank" rel="noopener" className="inline-flex items-center gap-1 hover:underline"><FileText className="h-3.5 w-3.5" />Ver modelo</a>
+                          <button type="button" onClick={() => setForm(f => ({ ...f, budget_template_url: '' }))} className="text-gray-400 hover:text-red-500"><Trash2 className="h-3 w-3" /></button>
+                        </span>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Notas de formato (opcional)</Label>
+                      <Textarea rows={2} placeholder="Ej.: separa mano de obra y materiales; su comisión suele ir ya incluida…" value={form.budget_template_notes} onChange={e => setForm(f => ({ ...f, budget_template_notes: e.target.value }))} />
                     </div>
                   </div>
                   <div className="flex items-center gap-3">

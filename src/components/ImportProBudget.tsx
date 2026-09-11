@@ -56,16 +56,16 @@ type CommissionType = 'percent' | 'fixed' | 'included'
 
 // Aplica la comisión a las líneas originales → líneas del cliente (comisión oculta en el precio)
 function applyCommission(ex: ExtractedBudget, type: CommissionType, value: number): BudgetLine[] {
-  const flat = ex.sections.flatMap(s => s.lines)
+  const flat = ex.sections.flatMap(s => s.lines.map(l => ({ ...l, section: s.title || undefined })))
   const origSub = flat.reduce((s, l) => s + l.total, 0)
   let lines: BudgetLine[]
   if (type === 'included') {
     // El precio subido YA es el final (la comisión va incluida): no se toca nada.
-    lines = flat.map(l => { const t = r2(l.total); return { concept: l.concept, units: 1, unit_price: t, total: t, uds_label: l.uds } })
+    lines = flat.map(l => { const t = r2(l.total); return { concept: l.concept, units: 1, unit_price: t, total: t, uds_label: l.uds, section: l.section } })
   } else if (type === 'percent') {
-    lines = flat.map(l => { const t = r2(l.total * (1 + value / 100)); return { concept: l.concept, units: 1, unit_price: t, total: t, uds_label: l.uds } })
+    lines = flat.map(l => { const t = r2(l.total * (1 + value / 100)); return { concept: l.concept, units: 1, unit_price: t, total: t, uds_label: l.uds, section: l.section } })
   } else {
-    lines = flat.map(l => { const extra = origSub > 0 ? value * (l.total / origSub) : 0; const t = r2(l.total + extra); return { concept: l.concept, units: 1, unit_price: t, total: t, uds_label: l.uds } })
+    lines = flat.map(l => { const extra = origSub > 0 ? value * (l.total / origSub) : 0; const t = r2(l.total + extra); return { concept: l.concept, units: 1, unit_price: t, total: t, uds_label: l.uds, section: l.section } })
     // Ajuste de redondeo para que el total cuadre con orig + fijo
     const target = r2(origSub + value), got = r2(lines.reduce((s, l) => s + l.total, 0)), diff = r2(target - got)
     if (diff !== 0 && lines.length) { const i = lines.reduce((mi, l, idx, a) => l.total > a[mi].total ? idx : mi, 0); lines[i] = { ...lines[i], total: r2(lines[i].total + diff), unit_price: r2(lines[i].unit_price + diff) } }
@@ -172,6 +172,7 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
       const payload = {
         org_id: orgId, lead_id: leadId || null, professional_id: pro.id, created_by: userId,
         client_name: finalClientName, client_phone: lead?.phone ?? null, client_address: clientAddress,
+        client_nif: extracted?.client.id_number || null,
         concept, lines, subtotal: finalSubtotal, vat_percent: iva, vat_amount: ivaAmount, total,
         margin_percent: 0, validity_days: 30, notes: null, status: 'draft', ai_generated: false,
         commission_amount: comision,  // comisión exacta: subtotal final − subtotal del profesional
