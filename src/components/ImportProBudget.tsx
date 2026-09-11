@@ -52,12 +52,17 @@ function parseUds(uds: string): { qty: number; unit: string } {
   return { qty, unit }
 }
 
+type CommissionType = 'percent' | 'fixed' | 'included'
+
 // Aplica la comisión a las líneas originales → líneas del cliente (comisión oculta en el precio)
-function applyCommission(ex: ExtractedBudget, type: 'percent' | 'fixed', value: number): BudgetLine[] {
+function applyCommission(ex: ExtractedBudget, type: CommissionType, value: number): BudgetLine[] {
   const flat = ex.sections.flatMap(s => s.lines)
   const origSub = flat.reduce((s, l) => s + l.total, 0)
   let lines: BudgetLine[]
-  if (type === 'percent') {
+  if (type === 'included') {
+    // El precio subido YA es el final (la comisión va incluida): no se toca nada.
+    lines = flat.map(l => { const t = r2(l.total); return { concept: l.concept, units: 1, unit_price: t, total: t, uds_label: l.uds } })
+  } else if (type === 'percent') {
     lines = flat.map(l => { const t = r2(l.total * (1 + value / 100)); return { concept: l.concept, units: 1, unit_price: t, total: t, uds_label: l.uds } })
   } else {
     lines = flat.map(l => { const extra = origSub > 0 ? value * (l.total / origSub) : 0; const t = r2(l.total + extra); return { concept: l.concept, units: 1, unit_price: t, total: t, uds_label: l.uds } })
@@ -80,7 +85,7 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
   const [extracting, setExtracting] = useState(false)
   const [extracted, setExtracted] = useState<ExtractedBudget | null>(null)
   const [error, setError] = useState('')
-  const [commissionType, setCommissionType] = useState<'percent' | 'fixed'>('percent')
+  const [commissionType, setCommissionType] = useState<CommissionType>('percent')
   const [commissionValue, setCommissionValue] = useState(15)
   const [iva, setIva] = useState(21)
   const [lines, setLines] = useState<BudgetLine[]>([])
@@ -92,7 +97,11 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
   const lead = leads.find(l => l.id === leadId)
   const origSubtotal = extracted ? r2(extracted.sections.flatMap(s => s.lines).reduce((s, l) => s + l.total, 0)) : 0
   const finalSubtotal = r2(lines.reduce((s, l) => s + (l.total || 0), 0))
-  const comision = r2(finalSubtotal - origSubtotal)
+  // Comisión para Finanzas: si ya viene incluida, se retrocalcula desde el precio final;
+  // si la añadimos (%, o fija), es la diferencia con el precio del profesional.
+  const comision = commissionType === 'included'
+    ? r2(finalSubtotal - finalSubtotal / (1 + (commissionValue || 0) / 100))
+    : r2(finalSubtotal - origSubtotal)
   const ivaAmount = r2(finalSubtotal * (iva || 0) / 100)
   const total = r2(finalSubtotal + ivaAmount)
 
@@ -266,25 +275,37 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Comisión</Label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button onClick={() => setCommissionType('percent')} className={`rounded-lg border p-3 text-left ${commissionType === 'percent' ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-gray-200'}`}>
-                  <p className="text-sm font-semibold text-gray-800">Porcentaje</p><p className="text-[11px] text-gray-400">% sobre cada partida</p>
+                  <p className="text-sm font-semibold text-gray-800">Añadir %</p><p className="text-[11px] text-gray-400">% sobre el precio del profesional</p>
                 </button>
                 <button onClick={() => setCommissionType('fixed')} className={`rounded-lg border p-3 text-left ${commissionType === 'fixed' ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-gray-200'}`}>
-                  <p className="text-sm font-semibold text-gray-800">Cantidad fija</p><p className="text-[11px] text-gray-400">€ repartidos entre las partidas</p>
+                  <p className="text-sm font-semibold text-gray-800">Añadir fija</p><p className="text-[11px] text-gray-400">€ repartidos entre partidas</p>
+                </button>
+                <button onClick={() => setCommissionType('included')} className={`rounded-lg border p-3 text-left ${commissionType === 'included' ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-gray-200'}`}>
+                  <p className="text-sm font-semibold text-gray-800">Ya incluida</p><p className="text-[11px] text-gray-400">el precio ya es el final</p>
                 </button>
               </div>
               <div className="flex items-center gap-2">
-                <Input type="number" min={0} step={commissionType === 'percent' ? '0.5' : '1'} value={commissionValue} onChange={e => setCommissionValue(Number(e.target.value))} className="h-10 w-28 text-right" />
-                <span className="text-sm text-gray-500">{commissionType === 'percent' ? '%' : '€ (total)'}</span>
+                <Input type="number" min={0} step={commissionType === 'fixed' ? '1' : '0.5'} value={commissionValue} onChange={e => setCommissionValue(Number(e.target.value))} className="h-10 w-28 text-right" />
+                <span className="text-sm text-gray-500">
+                  {commissionType === 'fixed' ? '€ (total)' : commissionType === 'included' ? '% ya incluido en el precio' : '%'}
+                </span>
               </div>
+              {commissionType === 'included' && (
+                <p className="text-[11px] text-gray-500 flex items-start gap-1"><AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-primary-500" />El precio que subiste se respeta tal cual (no se le suma nada). Indica qué % de comisión llevas ya dentro para reflejarlo en Finanzas.</p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label>IVA (%)</Label>
               <Input type="number" min={0} value={iva} onChange={e => setIva(Number(e.target.value))} className="h-10 w-28 text-right" />
             </div>
             <div className="bg-slate-50 rounded-lg p-3 text-sm text-gray-600">
-              Subtotal del profesional: <strong>{formatCurrency(origSubtotal)}</strong> → con comisión: <strong className="text-primary-700">{formatCurrency(commissionType === 'percent' ? r2(origSubtotal * (1 + commissionValue / 100)) : r2(origSubtotal + commissionValue))}</strong>
+              {commissionType === 'included' ? (
+                <>Precio final (tal cual): <strong className="text-primary-700">{formatCurrency(origSubtotal)}</strong> · comisión incluida ({commissionValue}%): <strong>{formatCurrency(r2(origSubtotal - origSubtotal / (1 + (commissionValue || 0) / 100)))}</strong></>
+              ) : (
+                <>Subtotal del profesional: <strong>{formatCurrency(origSubtotal)}</strong> → con comisión: <strong className="text-primary-700">{formatCurrency(commissionType === 'percent' ? r2(origSubtotal * (1 + commissionValue / 100)) : r2(origSubtotal + commissionValue))}</strong></>
+              )}
             </div>
             <div className="flex justify-between gap-2">
               <Button variant="outline" onClick={() => setStep(1)} className="gap-1.5"><ArrowLeft className="h-4 w-4" />Atrás</Button>
@@ -329,7 +350,7 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
 
             {/* Aviso interno (no sale en el PDF) */}
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
-              🔒 <strong>Interno:</strong> Comisión aplicada: {commissionType === 'percent' ? `${commissionValue}%` : `${formatCurrency(commissionValue)} fijos`} · Subtotal profesional: {formatCurrency(origSubtotal)} · Subtotal final: {formatCurrency(finalSubtotal)} · <strong>Os quedáis {formatCurrency(comision)}</strong>. Esto no aparece en el PDF del cliente.
+              🔒 <strong>Interno:</strong> Comisión {commissionType === 'included' ? `ya incluida (${commissionValue}%)` : commissionType === 'percent' ? `+${commissionValue}%` : `+${formatCurrency(commissionValue)} fijos`} · {commissionType === 'included' ? <>Precio final: {formatCurrency(finalSubtotal)}</> : <>Subtotal profesional: {formatCurrency(origSubtotal)} · Subtotal final: {formatCurrency(finalSubtotal)}</>} · <strong>Os quedáis {formatCurrency(comision)}</strong>. Esto no aparece en el PDF del cliente.
             </div>
             <div className="flex justify-end gap-4 text-sm">
               <span className="text-gray-500">Subtotal <strong className="text-gray-800">{formatCurrency(finalSubtotal)}</strong></span>
