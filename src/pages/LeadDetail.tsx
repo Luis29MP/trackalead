@@ -35,6 +35,7 @@ import { InvoiceForm } from '@/components/InvoiceForm'
 import { INVOICE_STATUS } from '@/pages/Invoices'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
 import { BudgetWizard, emptyDraft, type Draft } from './Budgets'
+import { ImportProBudget } from '@/components/ImportProBudget'
 import type { BoardColumn, CalendarEvent, EventType, LeadComment, LeadActivity, LeadFile, Professional, Budget, Invoice } from '@/types'
 
 const BUDGET_STATUS: Record<string, { label: string; color: string }> = {
@@ -353,6 +354,7 @@ export function LeadDetail() {
   const [leadBudgets,  setLeadBudgets]   = useState<Budget[]>([])
   const [leadInvoices, setLeadInvoices]  = useState<Invoice[]>([])
   const [budgetWizard, setBudgetWizard]  = useState<Draft | null>(null)
+  const [importOpen, setImportOpen]      = useState(false)
   const [preparingBudget, setPreparingBudget] = useState(false)
   const [invoiceOpen, setInvoiceOpen]    = useState(false)
   const [invoiceBudget, setInvoiceBudget] = useState<Budget | null>(null)
@@ -1829,17 +1831,16 @@ export function LeadDetail() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {/* Subir PDF del presupuesto */}
+              {/* Importar presupuesto del profesional (IA): lee todo el desglose y crea el presupuesto */}
               <Button
                 variant="outline"
                 size="sm"
                 className="w-full gap-2 text-amber-700 border-amber-300 hover:bg-amber-50"
-                disabled={extracting}
-                onClick={() => pdfInputRef.current?.click()}
+                onClick={() => setImportOpen(true)}
               >
-                <span>📄</span>
-                {extracting ? 'Leyendo PDF…' : 'Subir presupuesto PDF'}
+                <span>📄</span>Importar presupuesto (IA)
               </Button>
+              <p className="text-[11px] text-gray-400 -mt-1">Lee el desglose completo y lo crea en la pestaña Presupuestos.</p>
 
               <div className="space-y-1.5">
                 <Label className="text-xs text-gray-500">O introduce el importe manualmente</Label>
@@ -1983,6 +1984,20 @@ export function LeadDetail() {
           onClose={() => setBudgetWizard(null)}
           onSaved={() => loadRelated()}
           onEditBudget={() => { setBudgetWizard(null); navigate('/budgets') }}
+        />
+      )}
+
+      {/* Importar presupuesto del profesional (IA) desde la ficha del lead */}
+      {importOpen && organization && lead && (
+        <ImportProBudget
+          professionals={professionals}
+          leads={[lead]}
+          orgId={organization.id}
+          userId={user?.id ?? null}
+          initialProId={lead.assigned_to ?? ''}
+          initialLeadId={lead.id}
+          onClose={() => setImportOpen(false)}
+          onSaved={() => { loadRelated(); refetch(); setImportOpen(false) }}
         />
       )}
 

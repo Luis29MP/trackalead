@@ -73,13 +73,14 @@ function applyCommission(ex: ExtractedBudget, type: CommissionType, value: numbe
   return lines
 }
 
-export function ImportProBudget({ professionals, leads, orgId, userId, onClose, onSaved }: {
+export function ImportProBudget({ professionals, leads, orgId, userId, onClose, onSaved, initialProId = '', initialLeadId = '' }: {
   professionals: Professional[]; leads: Lead[]; orgId: string; userId: string | null
   onClose: () => void; onSaved: () => void
+  initialProId?: string; initialLeadId?: string
 }) {
   const [step, setStep] = useState<1 | 2 | 3>(1)
-  const [proId, setProId] = useState('')
-  const [leadId, setLeadId] = useState('')
+  const [proId, setProId] = useState(initialProId)
+  const [leadId, setLeadId] = useState(initialLeadId)
   const [fileName, setFileName] = useState('')
   const [fileUrl, setFileUrl] = useState<string | null>(null)
   const [extracting, setExtracting] = useState(false)
