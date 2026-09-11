@@ -199,7 +199,7 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
 
   return (
     <Dialog open onOpenChange={v => { if (!v) onClose() }}>
-      <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader><DialogTitle className="flex items-center gap-2"><Download className="h-5 w-5 text-primary-600" />Importar de profesional · Paso {step}/3</DialogTitle></DialogHeader>
 
         {/* Paso 1: profesional + lead + archivo */}
@@ -227,9 +227,9 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
             <div className="space-y-1.5">
               <Label>Presupuesto del profesional *</Label>
               {extracted ? (
-                <div className="flex items-center gap-2 border border-green-200 bg-green-50 rounded-lg px-3 py-2">
-                  <span className="text-sm text-green-700 flex-1 truncate">✓ {fileName} — {extracted.sections.flatMap(s => s.lines).length} partida(s) leídas</span>
-                  <button onClick={() => { setExtracted(null); setFileName(''); setFileUrl(null) }} className="text-gray-400 hover:text-red-500"><X className="h-4 w-4" /></button>
+                <div className="flex items-center gap-2 border border-green-200 bg-green-50 rounded-lg px-3 py-2 min-w-0">
+                  <span className="text-sm text-green-700 flex-1 min-w-0 truncate">✓ {fileName} — {extracted.sections.flatMap(s => s.lines).length} partida(s) leídas</span>
+                  <button onClick={() => { setExtracted(null); setFileName(''); setFileUrl(null) }} className="text-gray-400 hover:text-red-500 shrink-0"><X className="h-4 w-4" /></button>
                 </div>
               ) : (
                 <label className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl py-8 cursor-pointer ${extracting ? 'opacity-60 pointer-events-none' : 'border-gray-300 hover:border-primary-400'} text-gray-500`}>
