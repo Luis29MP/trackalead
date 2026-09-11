@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Download, Upload, Sparkles, ArrowLeft, ArrowRight, X, AlertCircle, Trash2 } from 'lucide-react'
+import { Download, Upload, Sparkles, ArrowLeft, ArrowRight, X, AlertCircle, Trash2, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
@@ -137,7 +137,7 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
     await supabase.from('professionals').update({ rates }).eq('id', pro.id)
   }
 
-  async function save() {
+  async function save(withPdf: boolean) {
     if (!pro) { setError('No se encuentra el profesional seleccionado. Vuelve al paso 1 y elígelo de nuevo.'); return }
     if (!lines.length) { setError('No hay partidas que guardar.'); return }
     setSaving(true); setError('')
@@ -177,14 +177,16 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
         await supabase.from('budget_library').insert({ org_id: orgId, title: `Import ${pro.name} · ${clientName}`, gremio: pro.specialty ?? null, content_text: libText.slice(0, 40000), file_url: fileUrl, source: 'pro', professional_id: pro.id })
       } catch (e) { console.warn('[ImportProBudget] biblioteca no actualizada (no crítico):', e) }
 
-      // 4) PDF del cliente (membrete del profesional, sin precio unitario) — no crítico
-      try {
-        const addr = [pro.address, pro.cif ? `NIF: ${pro.cif}` : null].filter(Boolean).join('  ·  ')
-        const issuer = { name: pro.company_name || pro.name, phone: pro.phone, email: pro.email, address: addr || null, logoUrl: pro.logo_url ?? null }
-        viewBudgetPdf({ ...(budget as Budget), lines }, issuer, { hideUnitPrice: true })
-      } catch (e) { console.warn('[ImportProBudget] PDF no generado (no crítico):', e) }
+      // 4) PDF del cliente (membrete del profesional, sin precio unitario) — solo si se pide
+      if (withPdf) {
+        try {
+          const addr = [pro.address, pro.cif ? `NIF: ${pro.cif}` : null].filter(Boolean).join('  ·  ')
+          const issuer = { name: pro.company_name || pro.name, phone: pro.phone, email: pro.email, address: addr || null, logoUrl: pro.logo_url ?? null }
+          viewBudgetPdf({ ...(budget as Budget), lines }, issuer, { hideUnitPrice: true })
+        } catch (e) { console.warn('[ImportProBudget] PDF no generado (no crítico):', e) }
+      }
 
-      toast.success('Presupuesto importado y creado')
+      toast.success(withPdf ? 'Presupuesto creado · generando PDF' : 'Presupuesto creado. Lo tienes en la lista de Presupuestos.')
       onSaved()
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Error al guardar'
@@ -314,9 +316,16 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" /><span>{error}</span>
               </div>
             )}
-            <div className="flex justify-between gap-2">
-              <Button variant="outline" onClick={() => setStep(2)} className="gap-1.5"><ArrowLeft className="h-4 w-4" />Atrás</Button>
-              <Button onClick={save} disabled={saving || lines.length === 0}>{saving ? 'Guardando…' : 'Guardar y generar PDF'}</Button>
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-1">
+              <Button variant="ghost" onClick={() => setStep(2)} disabled={saving} className="gap-1.5 text-gray-500"><ArrowLeft className="h-4 w-4" />Atrás</Button>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button variant="outline" onClick={() => save(false)} disabled={saving || lines.length === 0} className="gap-1.5">
+                  <Check className="h-4 w-4" />{saving ? 'Guardando…' : 'Solo guardar'}
+                </Button>
+                <Button onClick={() => save(true)} disabled={saving || lines.length === 0} className="gap-1.5">
+                  <Download className="h-4 w-4" />{saving ? 'Guardando…' : 'Guardar y generar PDF'}
+                </Button>
+              </div>
             </div>
           </div>
         )}
