@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   FileText, Plus, Sparkles, Download, Pencil, Trash2, Search,
-  ArrowLeft, ArrowRight, Check, ImagePlus, X, Layers, CheckCircle2, MessageCircle, Eye, Percent,
+  ArrowLeft, ArrowRight, Check, ImagePlus, X, Layers, CheckCircle2, MessageCircle, Eye, Percent, Link2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
@@ -101,6 +101,11 @@ function buildIssuer(budget: Budget, professionals: Professional[], orgName?: st
   return { name: orgName }
 }
 
+// Normaliza un nombre para comparar (sin tildes, minúsculas, espacios colapsados)
+function normName(s?: string | null): string {
+  return (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
 export function Budgets() {
   const { organization, user } = useAuth()
   const navigate = useNavigate()
@@ -116,6 +121,8 @@ export function Budgets() {
   const [importProOpen, setImportProOpen] = useState(false)
   const [ownBudgets, setOwnBudgets] = useState<{ id: string; professional_id: string; client_name: string | null; concept: string | null; lines: BudgetLine[]; subtotal: number; vat_percent: number; total: number; notes: string | null; created_at: string }[]>([])
   const [memberMap, setMemberMap] = useState<Record<string, string>>({})
+  const [assignBudget, setAssignBudget] = useState<Budget | null>(null)  // presupuesto al que asignar un lead
+  const [assignSearch, setAssignSearch] = useState('')
 
   useEffect(() => {
     if (!organization) return
@@ -233,6 +240,24 @@ export function Budgets() {
     else window.open(wa, '_blank')
   }
 
+  // Lead sugerido para un presupuesto sin asociar: coincidencia por nombre de cliente
+  function suggestLead(b: Budget): Lead | undefined {
+    if (b.lead_id) return undefined
+    const cn = normName(b.client_name)
+    if (!cn) return undefined
+    return leads.find(l => normName(l.name) === cn) || leads.find(l => cn && normName(l.name).includes(cn))
+  }
+
+  // Vincula un presupuesto a un lead (y mueve el lead a "Presupuestado" si procede)
+  async function assignLead(b: Budget, leadId: string) {
+    const { error } = await supabase.from('budgets').update({ lead_id: leadId, updated_at: new Date().toISOString() }).eq('id', b.id)
+    if (error) { toast.error(`No se pudo vincular: ${error.message}`); return }
+    await moveLeadToPresupuestado(leadId)
+    setBudgets(prev => prev.map(x => x.id === b.id ? { ...x, lead_id: leadId } : x))
+    setAssignBudget(null); setAssignSearch('')
+    toast.success('Presupuesto vinculado al lead')
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -282,7 +307,24 @@ export function Budgets() {
                           {b.client_name || '—'}
                         </button>
                       ) : (
-                        <span className="text-gray-900">{b.client_name || '—'}</span>
+                        <div className="space-y-1">
+                          <span className="text-gray-900">{b.client_name || '—'}</span>
+                          {(() => {
+                            const sug = suggestLead(b)
+                            return sug ? (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button onClick={() => assignLead(b, sug.id)} className="inline-flex items-center gap-1 text-[11px] font-medium text-primary-700 bg-primary-50 hover:bg-primary-100 rounded px-1.5 py-0.5" title={`Vincular con el lead de ${sug.name}`}>
+                                  <Link2 className="h-3 w-3" />¿Es {sug.name}? Vincular
+                                </button>
+                                <button onClick={() => { setAssignBudget(b); setAssignSearch('') }} className="text-[11px] text-gray-400 hover:text-primary-600 underline">otro</button>
+                              </div>
+                            ) : (
+                              <button onClick={() => { setAssignBudget(b); setAssignSearch('') }} className="inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-primary-600 hover:bg-gray-100 rounded px-1.5 py-0.5" title="Asignar a un lead">
+                                <Link2 className="h-3 w-3" />Asignar a lead
+                              </button>
+                            )
+                          })()}
+                        </div>
                       )}
                     </td>
                     <td className="px-3 py-3 text-gray-500 max-w-[220px] truncate">{b.concept || '—'}</td>
@@ -366,6 +408,41 @@ export function Budgets() {
           onSaved={() => { loadBudgets(); loadLeadsAndPros(); setImportProOpen(false) }}
         />
       )}
+
+      {/* Asignar un lead a un presupuesto sin asociar */}
+      <Dialog open={!!assignBudget} onOpenChange={v => { if (!v) { setAssignBudget(null); setAssignSearch('') } }}>
+        <DialogContent className="sm:max-w-md max-h-[85vh] flex flex-col">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Link2 className="h-4 w-4 text-primary-600" />Asignar a un lead</DialogTitle></DialogHeader>
+          {assignBudget && (
+            <div className="flex flex-col gap-3 min-h-0">
+              <p className="text-xs text-gray-500">Presupuesto de <strong>{assignBudget.client_name || '—'}</strong>. Elige el lead al que pertenece.</p>
+              <div className="relative">
+                <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Input autoFocus value={assignSearch} onChange={e => setAssignSearch(e.target.value)} placeholder="Buscar por nombre, teléfono o concepto…" className="pl-9 h-10" />
+              </div>
+              <div className="flex-1 overflow-y-auto -mx-1 px-1 divide-y divide-gray-50">
+                {leads
+                  .filter(l => {
+                    const q = normName(assignSearch)
+                    if (!q) return true
+                    return normName(l.name).includes(q) || normName(l.concept).includes(q) || (l.phone ?? '').includes(assignSearch.trim())
+                  })
+                  .slice(0, 60)
+                  .map(l => (
+                    <button key={l.id} onClick={() => assignLead(assignBudget, l.id)} className="w-full text-left py-2.5 px-2 hover:bg-primary-50 rounded-lg flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{l.name}</p>
+                        <p className="text-[11px] text-gray-400 truncate">{[l.concept, l.zone, l.phone].filter(Boolean).join(' · ') || 'Sin datos'}</p>
+                      </div>
+                      <Link2 className="h-4 w-4 text-primary-500 shrink-0" />
+                    </button>
+                  ))}
+                {leads.length === 0 && <p className="text-sm text-gray-400 py-6 text-center">No hay leads en esta organización.</p>}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Confirmación de aprobación */}
       <Dialog open={!!confirmApprove} onOpenChange={v => { if (!v) setConfirmApprove(null) }}>
