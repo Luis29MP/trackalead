@@ -138,43 +138,60 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
   }
 
   async function save() {
-    if (!pro) return
-    setSaving(true)
+    if (!pro) { setError('No se encuentra el profesional seleccionado. Vuelve al paso 1 y elígelo de nuevo.'); return }
+    if (!lines.length) { setError('No hay partidas que guardar.'); return }
+    setSaving(true); setError('')
     try {
       const clientName = extracted?.client.name || lead?.name || 'Cliente'
       const clientAddress = extracted?.client.address || lead?.address || null
       const concept = extracted?.sections.map(s => s.title).filter(Boolean).join(' + ') || (pro.specialty ? `Trabajo de ${pro.specialty}` : 'Presupuesto')
 
-      // 1) Crear el presupuesto del cliente (líneas con comisión ya aplicada)
-      const { data: budget, error: bErr } = await supabase.from('budgets').insert({
+      // 1) Crear el presupuesto del cliente (PASO CRÍTICO — líneas con comisión ya aplicada)
+      const payload = {
         org_id: orgId, lead_id: leadId || null, professional_id: pro.id, created_by: userId,
         client_name: clientName, client_phone: lead?.phone ?? null, client_address: clientAddress,
         concept, lines, subtotal: finalSubtotal, vat_percent: iva, vat_amount: ivaAmount, total,
         margin_percent: 0, validity_days: 30, notes: null, status: 'draft', ai_generated: false,
-      }).select().single()
-      if (bErr || !budget) throw new Error(bErr?.message || 'No se pudo crear el presupuesto')
+      }
+      const { data: budget, error: bErr } = await supabase.from('budgets').insert(payload).select().single()
+      if (bErr || !budget) {
+        console.error('[ImportProBudget] Falló el insert en budgets:', bErr, payload)
+        throw new Error(bErr?.message ? `No se pudo guardar el presupuesto: ${bErr.message}` : 'No se pudo guardar el presupuesto (respuesta vacía de la base de datos).')
+      }
 
+      // A partir de aquí el presupuesto YA existe: los pasos secundarios no deben tumbarlo ni ocultar su éxito.
       // 2) Auditoría del import (comisión interna)
-      await supabase.from('professional_imported_budgets').insert({
-        org_id: orgId, professional_id: pro.id, lead_id: leadId || null, budget_id: budget.id,
-        source_file_url: fileUrl, extracted_json: extracted, commission_type: commissionType, commission_value: commissionValue,
-        original_subtotal: origSubtotal, final_subtotal: finalSubtotal,
-      })
+      try {
+        await supabase.from('professional_imported_budgets').insert({
+          org_id: orgId, professional_id: pro.id, lead_id: leadId || null, budget_id: budget.id,
+          source_file_url: fileUrl, extracted_json: extracted, commission_type: commissionType, commission_value: commissionValue,
+          original_subtotal: origSubtotal, final_subtotal: finalSubtotal,
+        })
+      } catch (e) { console.warn('[ImportProBudget] auditoría no guardada (no crítico):', e) }
 
       // 3) Alimentar tarifas del profesional y la biblioteca (para la IA)
-      await mergeRates()
-      const libText = `Presupuesto real de ${pro.company_name || pro.name}${extracted?.client.name ? ` — cliente ${extracted.client.name}` : ''}\n` +
-        (extracted?.sections ?? []).map(s => `${s.title ? `# ${s.title}\n` : ''}${s.lines.map(l => `- ${l.concept} | ${l.uds} | ${l.total} €`).join('\n')}`).join('\n')
-      await supabase.from('budget_library').insert({ org_id: orgId, title: `Import ${pro.name} · ${clientName}`, gremio: pro.specialty ?? null, content_text: libText.slice(0, 40000), file_url: fileUrl, source: 'pro', professional_id: pro.id })
+      try { await mergeRates() } catch (e) { console.warn('[ImportProBudget] tarifas no actualizadas (no crítico):', e) }
+      try {
+        const libText = `Presupuesto real de ${pro.company_name || pro.name}${extracted?.client.name ? ` — cliente ${extracted.client.name}` : ''}\n` +
+          (extracted?.sections ?? []).map(s => `${s.title ? `# ${s.title}\n` : ''}${s.lines.map(l => `- ${l.concept} | ${l.uds} | ${l.total} €`).join('\n')}`).join('\n')
+        await supabase.from('budget_library').insert({ org_id: orgId, title: `Import ${pro.name} · ${clientName}`, gremio: pro.specialty ?? null, content_text: libText.slice(0, 40000), file_url: fileUrl, source: 'pro', professional_id: pro.id })
+      } catch (e) { console.warn('[ImportProBudget] biblioteca no actualizada (no crítico):', e) }
 
-      // 4) PDF del cliente (membrete del profesional, sin precio unitario)
-      const addr = [pro.address, pro.cif ? `NIF: ${pro.cif}` : null].filter(Boolean).join('  ·  ')
-      const issuer = { name: pro.company_name || pro.name, phone: pro.phone, email: pro.email, address: addr || null, logoUrl: pro.logo_url ?? null }
-      viewBudgetPdf({ ...(budget as Budget), lines }, issuer, { hideUnitPrice: true })
+      // 4) PDF del cliente (membrete del profesional, sin precio unitario) — no crítico
+      try {
+        const addr = [pro.address, pro.cif ? `NIF: ${pro.cif}` : null].filter(Boolean).join('  ·  ')
+        const issuer = { name: pro.company_name || pro.name, phone: pro.phone, email: pro.email, address: addr || null, logoUrl: pro.logo_url ?? null }
+        viewBudgetPdf({ ...(budget as Budget), lines }, issuer, { hideUnitPrice: true })
+      } catch (e) { console.warn('[ImportProBudget] PDF no generado (no crítico):', e) }
 
       toast.success('Presupuesto importado y creado')
       onSaved()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error al guardar') }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Error al guardar'
+      console.error('[ImportProBudget] save() error:', e)
+      setError(msg)
+      toast.error(msg)
+    }
     finally { setSaving(false) }
   }
 
@@ -292,6 +309,11 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
               <span className="text-primary-700 font-bold">Total {formatCurrency(total)}</span>
             </div>
 
+            {error && (
+              <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">
+                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" /><span>{error}</span>
+              </div>
+            )}
             <div className="flex justify-between gap-2">
               <Button variant="outline" onClick={() => setStep(2)} className="gap-1.5"><ArrowLeft className="h-4 w-4" />Atrás</Button>
               <Button onClick={save} disabled={saving || lines.length === 0}>{saving ? 'Guardando…' : 'Guardar y generar PDF'}</Button>
