@@ -491,7 +491,7 @@ REGLAS:
 
 // Extrae el presupuesto de un profesional (cliente + partidas) de forma fiel, para
 // reconstruirlo con comisión. NO calcula dinero con margen (eso se hace en el frontend).
-export async function extractBudgetDocument(input: { text?: string; images?: AiImage[] }): Promise<ExtractedBudget> {
+export async function extractBudgetDocument(input: { text?: string; images?: AiImage[]; issuerName?: string }): Promise<ExtractedBudget> {
   const { supabase } = await import('./supabase')
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('No hay usuario para la IA')
@@ -500,9 +500,14 @@ export async function extractBudgetDocument(input: { text?: string; images?: AiI
   const images = input.images ?? []
   if (!text && !images.length) throw new Error('No se pudo leer contenido del documento')
 
-  const prompt = text
+  // Pista sobre el emisor: el profesional NUNCA es el cliente. Evita que la IA
+  // confunda al que emite la factura/presupuesto con el cliente destinatario.
+  const issuerHint = input.issuerName?.trim()
+    ? `\n\nIMPORTANTE: El profesional que EMITE este documento es "${input.issuerName.trim()}" (o su empresa). Ese NO es el cliente. El "client.name" debe ser el DESTINATARIO del presupuesto (a quién va dirigido). Si no encuentras un destinatario claro y distinto del profesional, deja "client.name" como "".`
+    : ''
+  const prompt = (text
     ? `Documento (presupuesto del profesional):\n\n${text.slice(0, 40000)}`
-    : 'Analiza las imágenes adjuntas: es el presupuesto de un profesional.'
+    : 'Analiza las imágenes adjuntas: es el presupuesto de un profesional.') + issuerHint
 
   const { data, error } = await supabase.functions.invoke('ai-proxy', {
     body: { user_id: user.id, prompt, system: BUDGET_EXTRACT_SYSTEM, max_tokens: 4000, web_search: false, images, label: 'budget_import' },

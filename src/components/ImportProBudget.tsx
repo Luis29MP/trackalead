@@ -14,6 +14,11 @@ import type { ExtractedBudget } from '@/lib/ai'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
+// Normaliza un nombre para comparar (sin tildes, minúsculas, espacios colapsados)
+function normName(s?: string | null): string {
+  return (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
 // Imagen a base64 JPEG (para la visión de la IA en escaneos/fotos)
 function fileToImage(file: File): Promise<{ mime: string; data: string } | null> {
   return new Promise((resolve) => {
@@ -79,6 +84,8 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
   const [commissionValue, setCommissionValue] = useState(15)
   const [iva, setIva] = useState(21)
   const [lines, setLines] = useState<BudgetLine[]>([])
+  const [clientName, setClientName] = useState('')
+  const [clientAddr, setClientAddr] = useState('')
   const [saving, setSaving] = useState(false)
 
   const pro = professionals.find(p => p.id === proId)
@@ -104,7 +111,7 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
       }
       if (!text.trim() && !images.length) { setError('No se pudo leer el documento (¿formato no soportado?).'); return }
       const { extractBudgetDocument } = await import('@/lib/ai')
-      const ex = await extractBudgetDocument({ text, images })
+      const ex = await extractBudgetDocument({ text, images, issuerName: pro?.company_name || pro?.name })
       if (ex.sections.reduce((s, sec) => s + sec.lines.length, 0) === 0) { setError('No se detectaron partidas de precio en este documento. Revisa que el archivo sea legible.'); return }
       setExtracted(ex); setFileName(file.name)
     } catch (e) { setError(e instanceof Error ? e.message : 'Error al leer el documento') }
@@ -114,6 +121,11 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
   function goStep2() {
     if (!proId) { toast.error('Elige el profesional'); return }
     if (!extracted) { toast.error('Sube el presupuesto del profesional'); return }
+    // Nombre de cliente: si la IA devolvió al propio profesional como cliente, lo descartamos
+    const exName = extracted.client.name?.trim() || ''
+    const isPro = !!pro && (normName(exName) === normName(pro.name) || (!!pro.company_name && normName(exName) === normName(pro.company_name)))
+    setClientName(isPro ? '' : exName)
+    setClientAddr(extracted.client.address?.trim() || '')
     setStep(2)
   }
   function goStep3() {
@@ -142,14 +154,14 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
     if (!lines.length) { setError('No hay partidas que guardar.'); return }
     setSaving(true); setError('')
     try {
-      const clientName = extracted?.client.name || lead?.name || 'Cliente'
-      const clientAddress = extracted?.client.address || lead?.address || null
+      const finalClientName = clientName.trim() || lead?.name || 'Cliente'
+      const clientAddress = clientAddr.trim() || lead?.address || null
       const concept = extracted?.sections.map(s => s.title).filter(Boolean).join(' + ') || (pro.specialty ? `Trabajo de ${pro.specialty}` : 'Presupuesto')
 
       // 1) Crear el presupuesto del cliente (PASO CRÍTICO — líneas con comisión ya aplicada)
       const payload = {
         org_id: orgId, lead_id: leadId || null, professional_id: pro.id, created_by: userId,
-        client_name: clientName, client_phone: lead?.phone ?? null, client_address: clientAddress,
+        client_name: finalClientName, client_phone: lead?.phone ?? null, client_address: clientAddress,
         concept, lines, subtotal: finalSubtotal, vat_percent: iva, vat_amount: ivaAmount, total,
         margin_percent: 0, validity_days: 30, notes: null, status: 'draft', ai_generated: false,
       }
@@ -172,9 +184,9 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
       // 3) Alimentar tarifas del profesional y la biblioteca (para la IA)
       try { await mergeRates() } catch (e) { console.warn('[ImportProBudget] tarifas no actualizadas (no crítico):', e) }
       try {
-        const libText = `Presupuesto real de ${pro.company_name || pro.name}${extracted?.client.name ? ` — cliente ${extracted.client.name}` : ''}\n` +
+        const libText = `Presupuesto real de ${pro.company_name || pro.name}${finalClientName ? ` — cliente ${finalClientName}` : ''}\n` +
           (extracted?.sections ?? []).map(s => `${s.title ? `# ${s.title}\n` : ''}${s.lines.map(l => `- ${l.concept} | ${l.uds} | ${l.total} €`).join('\n')}`).join('\n')
-        await supabase.from('budget_library').insert({ org_id: orgId, title: `Import ${pro.name} · ${clientName}`, gremio: pro.specialty ?? null, content_text: libText.slice(0, 40000), file_url: fileUrl, source: 'pro', professional_id: pro.id })
+        await supabase.from('budget_library').insert({ org_id: orgId, title: `Import ${pro.name} · ${finalClientName}`, gremio: pro.specialty ?? null, content_text: libText.slice(0, 40000), file_url: fileUrl, source: 'pro', professional_id: pro.id })
       } catch (e) { console.warn('[ImportProBudget] biblioteca no actualizada (no crítico):', e) }
 
       // 4) PDF del cliente (membrete del profesional, sin precio unitario) — solo si se pide
@@ -283,6 +295,19 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
         {/* Paso 3: revisión */}
         {step === 3 && (
           <div className="space-y-4">
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Cliente {clientName.trim() ? '' : <span className="text-amber-600 text-[11px] font-normal">· revísalo</span>}</Label>
+                <Input value={clientName} onChange={e => setClientName(e.target.value)} placeholder="Nombre del cliente" className="h-10" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Dirección <span className="text-gray-400 text-[11px] font-normal">(opcional)</span></Label>
+                <Input value={clientAddr} onChange={e => setClientAddr(e.target.value)} placeholder="Dirección del cliente" className="h-10" />
+              </div>
+            </div>
+            {!clientName.trim() && (
+              <p className="text-[11px] text-amber-600 flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5" />No hemos detectado el cliente con seguridad (el documento parece una factura del profesional). Escríbelo aquí; luego la lista podrá vincularlo a su lead.</p>
+            )}
             <div className="border border-gray-100 rounded-lg overflow-x-auto">
               <table className="w-full text-sm min-w-[440px]">
                 <thead><tr className="bg-gray-50 text-[11px] text-gray-500 uppercase">
