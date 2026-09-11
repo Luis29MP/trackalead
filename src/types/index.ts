@@ -256,6 +256,10 @@ export interface Budget {
   ai_generated: boolean
   validated_at?: string | null   // validado por el profesional asignado
   validated_by?: string | null   // professional_id que validó
+  commission_amount?: number | null   // tu comisión (exacta en importados, estimada 15% en el resto)
+  commission_paid?: boolean            // comisión cobrada
+  accepted_at?: string | null          // aceptado por el cliente → firme
+  rejected_at?: string | null          // rechazado/caducado
   created_at: string
   updated_at: string
 }

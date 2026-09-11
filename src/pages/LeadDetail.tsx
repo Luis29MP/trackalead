@@ -86,6 +86,8 @@ type BudgetRowHandlers = {
   onInvoice: (b: Budget) => void
   onOpen: (b: Budget) => void
   onDelete: (b: Budget) => void
+  onAccept: (b: Budget) => void
+  onReject: (b: Budget) => void
 }
 
 // Badge de estado: "Validado" (por el profesional) tiene prioridad sobre el estado
@@ -116,9 +118,15 @@ function optionTabLabel(b: Budget, i: number): string {
   return `Propuesta ${m ? m[1] : i + 1}`
 }
 
-function BudgetActions({ b, onWhatsApp, onView, onExport, onInvoice, onOpen, onDelete }: { b: Budget } & BudgetRowHandlers) {
+function BudgetActions({ b, onWhatsApp, onView, onExport, onInvoice, onOpen, onDelete, onAccept, onReject }: { b: Budget } & BudgetRowHandlers) {
   return (
     <div className="flex items-center gap-1 shrink-0">
+      {(b.status === 'draft' || b.status === 'sent') && (
+        <button onClick={() => onAccept(b)} className="p-1.5 rounded hover:bg-green-50 text-green-600" title="Cliente lo acepta → Aceptados"><Check className="h-3.5 w-3.5" /></button>
+      )}
+      {b.status !== 'rejected' && (
+        <button onClick={() => onReject(b)} className="p-1.5 rounded hover:bg-red-50 text-red-400" title="Rechazar / caducar → Rechazados"><X className="h-3.5 w-3.5" /></button>
+      )}
       <button onClick={() => onView(b)} className="p-1.5 rounded hover:bg-primary-50 text-primary-600" title="Ver en el navegador"><Eye className="h-3.5 w-3.5" /></button>
       <button onClick={() => onInvoice(b)} className="p-1.5 rounded hover:bg-purple-50 text-purple-600" title="Convertir a factura"><Receipt className="h-3.5 w-3.5" /></button>
       <button onClick={() => onWhatsApp(b)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-500" title="Enviar por WhatsApp"><MessageCircle className="h-3.5 w-3.5" /></button>
@@ -470,6 +478,30 @@ export function LeadDetail() {
     const { error } = await supabase.from('budgets').delete().eq('id', b.id)
     if (error) { toast.error('No se pudo borrar'); return }
     toast.success('Presupuesto borrado'); loadRelated()
+  }
+
+  // Mueve el lead a la columna que cumpla el matcher (varía por tablero)
+  async function moveLeadColumn(match: (n: string) => boolean): Promise<boolean> {
+    if (!lead) return false
+    const col = columns.find(c => match(c.name))
+    if (!col) return false
+    await supabase.from('leads').update({ column_id: col.id, updated_at: new Date().toISOString() }).eq('id', lead.id)
+    return true
+  }
+  // Cliente acepta → firme + lead a Aceptados
+  async function acceptLeadBudget(b: Budget) {
+    await supabase.from('budgets').update({ status: 'accepted', accepted_at: new Date().toISOString(), rejected_at: null, updated_at: new Date().toISOString() }).eq('id', b.id)
+    const moved = await moveLeadColumn(n => /^acept/i.test(n.trim()))
+    toast.success(moved ? '✅ Aceptado · lead movido a Aceptados' : '✅ Presupuesto aceptado')
+    loadRelated(); refetch()
+  }
+  // Rechazado/caducado → lead a Rechazados (aviso de borrado a los 15 días)
+  async function rejectLeadBudget(b: Budget) {
+    if (!window.confirm('¿Marcar como rechazado/caducado? El lead pasará a Rechazados.')) return
+    await supabase.from('budgets').update({ status: 'rejected', rejected_at: new Date().toISOString(), accepted_at: null, updated_at: new Date().toISOString() }).eq('id', b.id)
+    const moved = await moveLeadColumn(n => /rechazad|no cerrad|no acept/i.test(n))
+    toast.success(moved ? 'Rechazado · lead movido a Rechazados' : 'Presupuesto rechazado')
+    loadRelated(); refetch()
   }
 
   // ── Facturas del lead ───────────────────────────────────────────────────────
@@ -1158,6 +1190,11 @@ export function LeadDetail() {
                   <Sparkles className="h-3.5 w-3.5" />{preparingBudget ? 'Leyendo adjuntos…' : 'Crear presupuesto'}
                 </Button>
               </div>
+              {leadBudgets.some(b => b.status === 'rejected' && b.rejected_at && (Date.now() - new Date(b.rejected_at).getTime()) / 86400000 >= 15) && (
+                <div className="mb-3 flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" /><span>Hay un presupuesto <strong>rechazado hace más de 15 días</strong>. Puedes borrarlo con la papelera 🗑️ para mantener la ficha limpia.</span>
+                </div>
+              )}
               {leadBudgets.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
                   <FileText className="h-8 w-8 mx-auto mb-2 opacity-30" />
@@ -1175,6 +1212,8 @@ export function LeadDetail() {
                       onExport={exportBudget}
                       onInvoice={(x) => { setEditInvoice(null); setInvoiceBudget(x); setInvoiceOpen(true) }}
                       onDelete={deleteBudget}
+                      onAccept={acceptLeadBudget}
+                      onReject={rejectLeadBudget}
                       onOpen={() => navigate('/budgets')}
                       onCompare={() => exportBudgetComparison(group, budgetIssuer(group[0]))}
                     />
@@ -1187,6 +1226,8 @@ export function LeadDetail() {
                       onExport={exportBudget}
                       onInvoice={(x) => { setEditInvoice(null); setInvoiceBudget(x); setInvoiceOpen(true) }}
                       onDelete={deleteBudget}
+                      onAccept={acceptLeadBudget}
+                      onReject={rejectLeadBudget}
                       onOpen={() => navigate('/budgets')}
                     />
                   ))}

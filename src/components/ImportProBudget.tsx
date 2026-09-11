@@ -164,6 +164,7 @@ export function ImportProBudget({ professionals, leads, orgId, userId, onClose, 
         client_name: finalClientName, client_phone: lead?.phone ?? null, client_address: clientAddress,
         concept, lines, subtotal: finalSubtotal, vat_percent: iva, vat_amount: ivaAmount, total,
         margin_percent: 0, validity_days: 30, notes: null, status: 'draft', ai_generated: false,
+        commission_amount: comision,  // comisión exacta: subtotal final − subtotal del profesional
       }
       const { data: budget, error: bErr } = await supabase.from('budgets').insert(payload).select().single()
       if (bErr || !budget) {

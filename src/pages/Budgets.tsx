@@ -106,6 +106,10 @@ function normName(s?: string | null): string {
   return (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
+// Detección flexible de columnas destino del tablero (varían por gremio)
+const isAcceptedCol = (n: string) => /^acept/i.test(n.trim())
+const isRejectedCol = (n: string) => /rechazad|no cerrad|no acept/i.test(n)
+
 export function Budgets() {
   const { organization, user } = useAuth()
   const navigate = useNavigate()
@@ -216,6 +220,36 @@ export function Budgets() {
     if (!col) return false
     await supabase.from('leads').update({ column_id: col.id, updated_at: new Date().toISOString() }).eq('id', leadId)
     return true
+  }
+
+  // Mueve el lead a la primera columna que cumpla el matcher (Aceptados / Rechazados)
+  async function moveLeadToColumn(leadId: string, match: (n: string) => boolean): Promise<boolean> {
+    const { data: lead } = await supabase.from('leads').select('board_id').eq('id', leadId).maybeSingle()
+    if (!lead?.board_id) return false
+    const { data: cols } = await supabase.from('board_columns').select('id, name').eq('board_id', lead.board_id)
+    const col = (cols ?? []).find(c => match(c.name))
+    if (!col) return false
+    await supabase.from('leads').update({ column_id: col.id, updated_at: new Date().toISOString() }).eq('id', leadId)
+    return true
+  }
+
+  // Cliente acepta el presupuesto → firme + lead a Aceptados
+  async function acceptBudget(b: Budget) {
+    await supabase.from('budgets').update({ status: 'accepted', accepted_at: new Date().toISOString(), rejected_at: null, updated_at: new Date().toISOString() }).eq('id', b.id)
+    let moved = false
+    if (b.lead_id) moved = await moveLeadToColumn(b.lead_id, isAcceptedCol)
+    setBudgets(prev => prev.map(x => x.id === b.id ? { ...x, status: 'accepted' } : x))
+    toast.success(moved ? '✅ Aceptado · lead movido a Aceptados' : '✅ Presupuesto aceptado')
+  }
+
+  // Rechazado/caducado → lead a Rechazados (se borrará a los 15 días con aviso)
+  async function rejectBudget(b: Budget) {
+    if (!confirm('¿Marcar como rechazado/caducado? El lead pasará a Rechazados.')) return
+    await supabase.from('budgets').update({ status: 'rejected', rejected_at: new Date().toISOString(), accepted_at: null, updated_at: new Date().toISOString() }).eq('id', b.id)
+    let moved = false
+    if (b.lead_id) moved = await moveLeadToColumn(b.lead_id, isRejectedCol)
+    setBudgets(prev => prev.map(x => x.id === b.id ? { ...x, status: 'rejected' } : x))
+    toast.success(moved ? 'Rechazado · lead movido a Rechazados' : 'Presupuesto rechazado')
   }
 
   // Aprobar (OK): marca como enviado y mueve el lead a Presupuestado
@@ -339,9 +373,15 @@ export function Budgets() {
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1.5">
                         {b.status === 'draft' && (
-                          <Button size="sm" className="h-7 gap-1 bg-green-600 hover:bg-green-700 text-white" onClick={() => setConfirmApprove(b)} title="Aprobar presupuesto">
+                          <Button size="sm" className="h-7 gap-1 bg-green-600 hover:bg-green-700 text-white" onClick={() => setConfirmApprove(b)} title="Aprobar y enviar al cliente">
                             <CheckCircle2 className="h-3.5 w-3.5" />Aprobar
                           </Button>
+                        )}
+                        {(b.status === 'draft' || b.status === 'sent') && (
+                          <button onClick={() => acceptBudget(b)} className="p-1.5 rounded hover:bg-green-50 text-green-600" title="Cliente lo acepta → Aceptados"><Check className="h-4 w-4" /></button>
+                        )}
+                        {b.status !== 'rejected' && (
+                          <button onClick={() => rejectBudget(b)} className="p-1.5 rounded hover:bg-red-50 text-red-400" title="Rechazar / caducar → Rechazados"><X className="h-4 w-4" /></button>
                         )}
                         <button onClick={() => sendWhatsApp(b)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-500" title="Enviar por WhatsApp"><MessageCircle className="h-4 w-4" /></button>
                         <button onClick={() => openEdit(b)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500" title="Ver / Editar"><Pencil className="h-3.5 w-3.5" /></button>
