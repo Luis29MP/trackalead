@@ -32,23 +32,78 @@ import { BUDGET_STATE_META } from '@/lib/budgetState'
 import type { Board, Lead, BoardColumn } from '@/types'
 
 // ── Smart paste ───────────────────────────────────────────────────────────────────
+// Normaliza (sin tildes, minúsculas) para comparar etiquetas
+function normKey(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+}
+
+// Asigna una etiqueta de campo a una clave canónica del formulario
+function labelToField(label: string): 'name' | 'company' | 'concept' | 'zone' | 'phone' | 'email' | 'notes' | 'when' | '' {
+  const t = normKey(label)
+  if (/^(nombre|cliente|contacto|solicitante|nombre y apellidos)$/.test(t) || /\bnombre\b/.test(t)) return 'name'
+  if (/telefono|tlf|^tel$|movil|celular|whatsapp|numero de contacto|contacto telefonico/.test(t)) return 'phone'
+  if (/email|correo|e-mail|mail/.test(t)) return 'email'
+  if (/zona|ciudad|localidad|poblacion|municipio|direccion|provincia|ubicacion/.test(t)) return 'zone'
+  if (/empresa|compania|negocio/.test(t)) return 'company'
+  if (/concepto|servicio|tipo de trabajo|selecciona|asunto|categoria|gremio/.test(t)) return 'concept'
+  if (/mensaje|detalle|descripcion|comentario|observacion|solicitud|consulta|necesito|trabajo a realizar/.test(t)) return 'notes'
+  if (/cuando|plazo|fecha|urgencia|empezar|inicio|presupuesto/.test(t)) return 'when'
+  return ''
+}
+
 function parsePastedText(text: string): Partial<NewLeadForm> {
   const r: Partial<NewLeadForm> = {}
-  const phone = text.match(/(?:(?:tlf|tel|teléfono|móvil|celular)\s*:?\s*)?(\+?[\d]{3}[\s\-]?[\d]{3}[\s\-]?[\d]{3,4})/i)
-  if (phone) r.phone = phone[1].replace(/[\s\-]/g, '')
-  const email = text.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)
-  if (email) r.email = email[0]
-  const zone = text.match(/(?:zona|ciudad|localidad|población|municipio)\s*:?\s*([A-Za-záéíóúÁÉÍÓÚñÑ\s,]+?)(?:\n|$|,)/i)
-  if (zone) r.zone = zone[1].trim()
-  const concept = text.match(/(?:trabajo|concepto|servicio|tipo|obra|reforma|selecciona\s+servicio)\s*:?\s*([^\n,]+)/i)
-  if (concept) r.concept = concept[1].trim()
-  // Mensaje / descripción → trabajo a realizar
-  const msg = text.match(/(?:mensaje|descripci[oó]n|detalle|comentario)\s*:?\s*([^\n]{10,})/i)
-  if (msg) r.notes = msg[1].trim()
-  // Nombre: primera línea sin teléfono ni email
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
-  const nameLine = lines.find(l => !l.match(/\d{9}/) && !l.includes('@') && l.length > 2 && l.length < 70)
-  if (nameLine) r.name = nameLine.replace(/^(?:nombre|cliente|contacto|name)\s*:\s*/i, '').trim()
+  const fields: Partial<Record<'name'|'company'|'concept'|'zone'|'phone'|'email'|'notes'|'when', string>> = {}
+  const extraNotes: string[] = []
+
+  // Parseo por campos: tolera "*Etiqueta:* valor", "Etiqueta: valor", viñetas y
+  // continuación multilínea (líneas sueltas se añaden al último campo abierto).
+  let lastKey: 'name'|'company'|'concept'|'zone'|'phone'|'email'|'notes'|'when'|null = null
+  for (const raw of text.replace(/\r/g, '').split('\n')) {
+    const line = raw.replace(/[*_`]+/g, '').replace(/^\s*[-•·]\s*/, '').trim()
+    if (!line) { lastKey = null; continue }
+    const m = line.match(/^([A-Za-zÁÉÍÓÚáéíóúÑñ()¿?/¡!.\s]{2,45}?)\s*:\s*(.*)$/)
+    if (m) {
+      const key = labelToField(m[1])
+      const val = m[2].trim()
+      if (key) {
+        fields[key] = fields[key] ? `${fields[key]} ${val}`.trim() : val
+        lastKey = key
+        continue
+      }
+      // etiqueta desconocida con ":" → va a notas conservando la etiqueta
+      extraNotes.push(line); lastKey = null; continue
+    }
+    // Línea de continuación del último campo (ej. "Más detalles" en varias líneas)
+    if (lastKey) fields[lastKey] = `${fields[lastKey] ?? ''} ${line}`.trim()
+    else extraNotes.push(line)
+  }
+
+  // Teléfono: del campo o, si no, buscando un móvil español en todo el texto
+  const phoneRaw = fields.phone || ''
+  const phoneMatch = (phoneRaw || text).match(/\+?\d[\d\s\-.]{7,}\d/)
+  if (phoneMatch) { const digits = phoneMatch[0].replace(/[\s\-.]/g, ''); if (digits.replace(/^\+/, '').length >= 9) r.phone = digits }
+
+  const emailMatch = (fields.email || text).match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)
+  if (emailMatch) r.email = emailMatch[0]
+
+  if (fields.name) r.name = fields.name
+  if (fields.company) r.company = fields.company
+  if (fields.zone) r.zone = fields.zone
+  if (fields.concept) r.concept = fields.concept
+
+  // Notas / trabajo a realizar: mensaje + cuándo + resto de líneas sin etiqueta
+  const notesParts = [fields.notes, fields.when ? `Cuándo: ${fields.when}` : '', ...extraNotes].filter(Boolean) as string[]
+  if (notesParts.length) r.notes = notesParts.join('\n').trim()
+
+  // Fallback: si no se detectó nombre por etiqueta, coge la 1ª línea "de persona"
+  if (!r.name) {
+    const cand = text.replace(/[*_`]+/g, '').split('\n').map(l => l.trim()).filter(Boolean)
+      .find(l => !/\d{6,}/.test(l) && !l.includes('@') && !l.includes(':') && l.length > 2 && l.length < 60)
+    if (cand) r.name = cand
+  }
+  // Si no hubo campo de mensaje y no hay concepto, usa todo el texto como notas
+  if (!r.notes && !fields.concept) r.notes = text.trim()
   return r
 }
 
