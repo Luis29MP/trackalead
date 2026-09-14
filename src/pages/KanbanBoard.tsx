@@ -277,7 +277,6 @@ function formatLeadSummary(a: import('@/lib/ai').LeadAnalysis): string {
   const zona = a.zone || 'No facilitada'
   const trabajo = a.work_type || a.concept || 'Por definir'
   const medidas = a.measures || 'Pendiente de facilitar'
-  const trelloBits = [nombre, a.zone || null, trabajo].filter(Boolean).join(' - ')
   return [
     `🔖 Referencia: ${a.phone || 'Sin referencia'}`,
     `FECHA: ${fecha}`,
@@ -289,7 +288,6 @@ function formatLeadSummary(a: import('@/lib/ai').LeadAnalysis): string {
     `📝 Descripción rápida: ${a.description}`,
     `📸 Fotos: ${a.photos ? 'Sí' : 'No'}`,
     `📌 Nota: ${a.note || 'Sin notas adicionales.'}`,
-    `TARJETA TRELLO: ${trelloBits}${a.measures ? ` (${a.measures})` : ''}`,
   ].join('\n')
 }
 
