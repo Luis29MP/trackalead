@@ -273,17 +273,23 @@ function formatLeadSummary(a: import('@/lib/ai').LeadAnalysis): string {
   const t = new Date()
   const p = (n: number) => String(n).padStart(2, '0')
   const fecha = `${p(t.getDate())}/${p(t.getMonth() + 1)}/${String(t.getFullYear()).slice(-2)}`
+  const nombre = a.name || '—'
+  const zona = a.zone || 'No facilitada'
+  const trabajo = a.work_type || a.concept || 'Por definir'
+  const medidas = a.measures || 'Pendiente de facilitar'
+  const trelloBits = [nombre, a.zone || null, trabajo].filter(Boolean).join(' - ')
   return [
-    `🔖 Referencia: ${a.phone}`,
+    `🔖 Referencia: ${a.phone || 'Sin referencia'}`,
     `FECHA: ${fecha}`,
-    `🧑‍💼 Nombre del cliente: ${a.name}`,
-    `📞 Teléfono: ${a.phone}`,
-    `📍 Zona: ${a.zone}`,
-    `🛠 Tipo de trabajo: ${a.work_type || a.concept}`,
-    `📐 Medidas: ${a.measures || 'Pendiente de facilitar'}`,
+    `🧑‍💼 Nombre del cliente: ${nombre}`,
+    `📞 Teléfono: ${a.phone || 'No facilitado'}`,
+    `📍 Zona: ${zona}`,
+    `🛠 Tipo de trabajo: ${trabajo}`,
+    `📐 Medidas: ${medidas}`,
     `📝 Descripción rápida: ${a.description}`,
     `📸 Fotos: ${a.photos ? 'Sí' : 'No'}`,
-    `📌 Nota: ${a.note}`,
+    `📌 Nota: ${a.note || 'Sin notas adicionales.'}`,
+    `TARJETA TRELLO: ${trelloBits}${a.measures ? ` (${a.measures})` : ''}`,
   ].join('\n')
 }
 
@@ -564,15 +570,25 @@ export function KanbanBoard() {
     try {
       const { analyzeLeadMessage } = await import('@/lib/ai')
       const a = await analyzeLeadMessage(rawText)
+      // Completa el análisis con lo que ya haya en el formulario (p. ej. el teléfono
+      // introducido a mano no viene en el mensaje pegado): así el resumen lo incluye.
+      const merged = {
+        ...a,
+        name:  a.name  || form.name,
+        phone: a.phone || form.phone,
+        email: a.email || form.email,
+        zone:  a.zone  || form.zone,
+        concept: a.concept || form.concept,
+      }
       // Rellenar campos (sin pisar lo ya escrito si la IA devuelve vacío)
       setForm(f => ({
         ...f,
-        name:    a.name    || f.name,
-        phone:   a.phone   || f.phone,
-        email:   a.email   || f.email,
-        zone:    a.zone    || f.zone,
-        concept: a.concept || f.concept,
-        notes:   formatLeadSummary(a),
+        name:    merged.name,
+        phone:   merged.phone,
+        email:   merged.email,
+        zone:    merged.zone,
+        concept: merged.concept,
+        notes:   formatLeadSummary(merged),
       }))
       setAiStatus('done')
       toast.success('Campos rellenados con IA')
