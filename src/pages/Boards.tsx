@@ -21,6 +21,19 @@ const BOARD_COLORS = [
   '#9333EA', '#C026D3', '#E11D48', '#65A30D',
 ]
 
+// Verticales/gremios estándar (se crean como tableros dentro del grupo)
+const VERTICALS: { key: string; label: string }[] = [
+  { key: 'carpinteria', label: 'Carpintería' },
+  { key: 'carpinteria_metalica', label: 'Carpintería Metálica' },
+  { key: 'electricidad', label: 'Electricidad' },
+  { key: 'fontaneria', label: 'Fontanería' },
+  { key: 'pintura', label: 'Pintura' },
+  { key: 'placas_solares', label: 'Placas solares' },
+  { key: 'reformas', label: 'Reformas' },
+]
+
+const slugify = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+
 interface BoardFormData {
   name: string
   description: string
@@ -30,7 +43,7 @@ interface BoardFormData {
 
 export function Boards() {
   const { boards, loading, createBoard, refetch } = useBoards()
-  const { territories } = useTerritories()
+  const { territories, createTerritory } = useTerritories()
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [selectedColor, setSelectedColor] = useState(BOARD_COLORS[0])
@@ -74,6 +87,34 @@ export function Boards() {
       toast.error('Error al crear tablero')
     } finally {
       setCreating(false)
+    }
+  }
+
+  // Nuevo grupo (zona / empresa)
+  const [groupOpen, setGroupOpen] = useState(false)
+  const [groupName, setGroupName] = useState('')
+  const [groupKind, setGroupKind] = useState<'zona' | 'empresa' | 'otro'>('zona')
+  const [groupVerticals, setGroupVerticals] = useState<Set<string>>(() => new Set(VERTICALS.map(v => v.key)))
+  const [creatingGroup, setCreatingGroup] = useState(false)
+
+  function toggleGroupVertical(key: string) {
+    setGroupVerticals(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n })
+  }
+
+  async function handleCreateGroup() {
+    const name = groupName.trim()
+    if (!name) { toast.error('Ponle un nombre al grupo'); return }
+    setCreatingGroup(true)
+    try {
+      await createTerritory(name, slugify(name) || null, VERTICALS.filter(v => groupVerticals.has(v.key)).map(v => v.key), groupKind)
+      await refetch()
+      toast.success(`Grupo "${name}" creado`)
+      setGroupOpen(false)
+      setGroupName(''); setGroupKind('zona'); setGroupVerticals(new Set(VERTICALS.map(v => v.key)))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo crear el grupo')
+    } finally {
+      setCreatingGroup(false)
     }
   }
 
@@ -132,7 +173,10 @@ export function Boards() {
           <h1 className="text-2xl font-bold text-gray-900">Tableros</h1>
           <p className="text-gray-500 text-sm mt-1">Gestiona los tableros de captación de leads</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" className="gap-1.5" onClick={() => setGroupOpen(true)}>
+            <Layers className="h-4 w-4" />Nuevo grupo
+          </Button>
           <Button variant="outline" className="gap-1.5" onClick={openImportPicker}>
             <Download className="h-4 w-4" />Importar de Trello
           </Button>
@@ -300,6 +344,60 @@ export function Boards() {
         onOpenChange={v => { if (!v) setDeleteTarget(null) }}
         onDeleted={() => { setDeleteTarget(null); refetch() }}
       />
+
+      {/* Nuevo grupo (zona / empresa) */}
+      <Dialog open={groupOpen} onOpenChange={setGroupOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Layers className="h-5 w-5 text-primary-600" />Nuevo grupo de tableros</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Nombre</Label>
+              <Input value={groupName} onChange={e => setGroupName(e.target.value)} placeholder="Ej.: Valladolid · o · Constructora X" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Tipo</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { key: 'zona', label: 'Zona', icon: MapPin, desc: 'Geográfica' },
+                  { key: 'empresa', label: 'Empresa', icon: Building2, desc: 'Cliente recurrente' },
+                  { key: 'otro', label: 'Otro', icon: Layers, desc: 'Agrupación libre' },
+                ] as const).map(opt => (
+                  <button key={opt.key} type="button" onClick={() => setGroupKind(opt.key)}
+                    className={`text-left rounded-lg border p-2.5 transition-colors ${groupKind === opt.key ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-gray-200 hover:border-gray-300'}`}>
+                    <opt.icon className="h-4 w-4 text-primary-600 mb-1" />
+                    <p className="text-xs font-semibold text-gray-800">{opt.label}</p>
+                    <p className="text-[11px] text-gray-400 leading-tight">{opt.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Tableros a crear (por gremio)</Label>
+              <p className="text-[11px] text-gray-400 -mt-1">Cada uno se crea con las columnas del tablero del mismo gremio ya existente. Puedes dejar ninguno y añadirlos luego a mano.</p>
+              <div className="border border-gray-100 rounded-lg p-2 grid grid-cols-2 gap-1">
+                {VERTICALS.map(v => {
+                  const checked = groupVerticals.has(v.key)
+                  return (
+                    <button key={v.key} type="button" onClick={() => toggleGroupVertical(v.key)}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 transition-colors text-left">
+                      <span className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 ${checked ? 'bg-primary-600 border-primary-600' : 'border-gray-300'}`}>
+                        {checked && <Check className="h-3 w-3 text-white" />}
+                      </span>
+                      <span className="text-xs text-gray-700">{v.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={() => setGroupOpen(false)}>Cancelar</Button>
+              <Button onClick={handleCreateGroup} disabled={creatingGroup || !groupName.trim()}>
+                {creatingGroup ? 'Creando…' : 'Crear grupo'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Importar de Trello: elegir tablero destino */}
       <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
