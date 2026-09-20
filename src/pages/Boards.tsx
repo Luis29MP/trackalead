@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Globe, Layers, Check, Trash2, Users, Sparkles, Download, MapPin, Building2 } from 'lucide-react'
+import { Plus, Globe, Layers, Check, Trash2, Users, Sparkles, Download, MapPin, Building2, ArrowLeft, ChevronRight } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
@@ -48,13 +48,18 @@ export function Boards() {
   const [creating, setCreating] = useState(false)
   const [selectedColor, setSelectedColor] = useState(BOARD_COLORS[0])
   const [territoryId, setTerritoryId] = useState<string>('')
+  // Navegación de 2 niveles: raíz muestra grupos; al abrir uno, sus tableros. '__none__' = sin grupo.
+  const [openGroupId, setOpenGroupId] = useState<string | null>(null)
   const [preset, setPreset] = useState<'standard' | 'empty' | 'custom'>('standard')
   const [customCols, setCustomCols] = useState<Set<string>>(() => new Set(STANDARD_COLUMNS.map(c => c.name)))
   const navigate = useNavigate()
   const form = useForm<BoardFormData>({ defaultValues: { color: BOARD_COLORS[0] } })
 
-  // Por defecto, el nuevo tablero se crea en el primer territorio (ej. León)
-  useEffect(() => { if (!territoryId && territories.length) setTerritoryId(territories[0].id) }, [territories, territoryId])
+  // El nuevo tablero se crea, por defecto, en el grupo abierto (o el primero)
+  useEffect(() => {
+    if (openGroupId && openGroupId !== '__none__') setTerritoryId(openGroupId)
+    else if (!territoryId && territories.length) setTerritoryId(territories[0].id)
+  }, [territories, territoryId, openGroupId])
 
   function toggleCustomCol(name: string) {
     setCustomCols(prev => {
@@ -310,31 +315,54 @@ export function Boards() {
             <BoardCard key={board.id} board={board} onClick={() => navigate(`/boards/${board.id}`)} onDelete={() => setDeleteTarget(board)} />
           ))}
         </div>
+      ) : openGroupId === null ? (
+        // ── RAÍZ: tarjetas de grupo (León, empresas…) ─────────────────────────
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {territories.map((t) => {
+            const list = boards.filter(b => b.territory_id === t.id)
+            const leads = list.reduce((s, b) => s + (b.lead_count ?? 0), 0)
+            return <GroupCard key={t.id} name={t.name} kind={t.kind} boardCount={list.length} leadCount={leads} onClick={() => setOpenGroupId(t.id)} />
+          })}
+          {boards.some(b => !b.territory_id) && (() => {
+            const list = boards.filter(b => !b.territory_id)
+            const leads = list.reduce((s, b) => s + (b.lead_count ?? 0), 0)
+            return <GroupCard name="Sin grupo" kind="otro" boardCount={list.length} leadCount={leads} onClick={() => setOpenGroupId('__none__')} />
+          })()}
+        </div>
       ) : (
-        <div className="space-y-8">
-          {[...territories, null].map((terr) => {
-            const list = boards.filter((b) => (b.territory_id ?? null) === (terr?.id ?? null))
-            if (list.length === 0) return null
-            return (
-              <section key={terr?.id ?? 'none'}>
-                <div className="flex items-center gap-2 mb-3">
-                  {terr?.kind === 'empresa'
-                    ? <Building2 className="h-4 w-4 text-primary-600 shrink-0" />
-                    : terr ? <MapPin className="h-4 w-4 text-primary-600 shrink-0" />
-                    : <Layers className="h-4 w-4 text-gray-400 shrink-0" />}
-                  <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">{terr?.name ?? 'Sin grupo'}</h2>
-                  {terr && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 capitalize">{terr.kind}</span>}
-                  <span className="text-xs text-gray-400">· {list.length} {list.length === 1 ? 'tablero' : 'tableros'}</span>
+        // ── DENTRO DE UN GRUPO: sus tableros ──────────────────────────────────
+        (() => {
+          const terr = territories.find(t => t.id === openGroupId) ?? null
+          const list = boards.filter(b => (b.territory_id ?? null) === (openGroupId === '__none__' ? null : openGroupId))
+          return (
+            <div className="space-y-4">
+              <button onClick={() => setOpenGroupId(null)} className="inline-flex items-center gap-1.5 text-sm text-primary-600 hover:underline">
+                <ArrowLeft className="h-4 w-4" />Todos los grupos
+              </button>
+              <div className="flex items-center gap-2">
+                {terr?.kind === 'empresa' ? <Building2 className="h-5 w-5 text-primary-600 shrink-0" />
+                  : terr ? <MapPin className="h-5 w-5 text-primary-600 shrink-0" />
+                  : <Layers className="h-5 w-5 text-gray-400 shrink-0" />}
+                <h2 className="text-lg font-bold text-gray-900">{terr?.name ?? 'Sin grupo'}</h2>
+                {terr && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 capitalize">{terr.kind}</span>}
+                <span className="text-xs text-gray-400">· {list.length} {list.length === 1 ? 'tablero' : 'tableros'}</span>
+              </div>
+              {list.length === 0 ? (
+                <div className="text-center py-12 text-gray-400 border border-dashed border-gray-200 rounded-xl">
+                  <Layers className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                  <p className="text-sm">Este grupo no tiene tableros todavía.</p>
+                  <Button variant="outline" className="mt-3 gap-1.5" onClick={() => setOpen(true)}><Plus className="h-4 w-4" />Añadir tablero</Button>
                 </div>
+              ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {list.map((board) => (
                     <BoardCard key={board.id} board={board} onClick={() => navigate(`/boards/${board.id}`)} onDelete={() => setDeleteTarget(board)} />
                   ))}
                 </div>
-              </section>
-            )
-          })}
-        </div>
+              )}
+            </div>
+          )
+        })()
       )}
 
       <DeleteBoardDialog
@@ -468,6 +496,38 @@ export function Boards() {
         />
       )}
     </div>
+  )
+}
+
+function GroupCard({ name, kind, boardCount, leadCount, onClick }: { name: string; kind: string; boardCount: number; leadCount: number; onClick: () => void }) {
+  const Icon = kind === 'empresa' ? Building2 : kind === 'zona' ? MapPin : Layers
+  return (
+    <Card className="group cursor-pointer hover:shadow-md transition-shadow" onClick={onClick}>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
+              <Icon className="h-5 w-5 text-primary-600" />
+            </div>
+            <div className="min-w-0">
+              <CardTitle className="text-base leading-tight truncate">{name}</CardTitle>
+              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide capitalize">{kind}</span>
+            </div>
+          </div>
+          <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-primary-500 shrink-0 mt-1" />
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="flex items-center gap-2 text-xs">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 text-slate-700 px-2.5 py-1 font-semibold">
+            <Layers className="h-3.5 w-3.5 text-slate-400" />{boardCount} {boardCount === 1 ? 'tablero' : 'tableros'}
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 text-slate-700 px-2.5 py-1 font-semibold">
+            <Users className="h-3.5 w-3.5 text-slate-400" />{leadCount} {leadCount === 1 ? 'lead' : 'leads'}
+          </span>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
