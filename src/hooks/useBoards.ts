@@ -1,7 +1,38 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import type { Board, BoardColumn, BudgetState } from '@/types'
+import type { Board, BoardColumn, BudgetState, Territory } from '@/types'
 import { useAuth } from '@/context/AuthContext'
+
+// Territorios (zona/provincia) de la organización
+export function useTerritories() {
+  const [territories, setTerritories] = useState<Territory[]>([])
+  const [loading, setLoading] = useState(false)
+  const { organization } = useAuth()
+
+  useEffect(() => {
+    if (!organization?.id) { setTerritories([]); return }
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organization?.id])
+
+  async function load() {
+    setLoading(true)
+    const { data } = await supabase.from('territories').select('*').eq('org_id', organization!.id).order('name')
+    setTerritories((data ?? []) as Territory[])
+    setLoading(false)
+  }
+
+  async function createTerritory(name: string, slug: string | null, verticals: string[]) {
+    const { data, error } = await supabase.rpc('create_territory', {
+      p_org: organization!.id, p_name: name, p_slug: slug, p_verticals: verticals,
+    })
+    if (error) throw error
+    await load()
+    return data as string
+  }
+
+  return { territories, loading, refetch: load, createTerritory }
+}
 
 // Columnas estándar de un tablero de captación de leads
 export const STANDARD_COLUMNS: { name: string; color: string }[] = [

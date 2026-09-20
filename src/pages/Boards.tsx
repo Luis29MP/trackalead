@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Globe, Layers, Check, Trash2, Users, Sparkles, Download } from 'lucide-react'
+import { Plus, Globe, Layers, Check, Trash2, Users, Sparkles, Download, MapPin } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
-import { useBoards, STANDARD_COLUMNS } from '@/hooks/useBoards'
+import { useBoards, useTerritories, STANDARD_COLUMNS } from '@/hooks/useBoards'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,13 +30,18 @@ interface BoardFormData {
 
 export function Boards() {
   const { boards, loading, createBoard, refetch } = useBoards()
+  const { territories } = useTerritories()
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [selectedColor, setSelectedColor] = useState(BOARD_COLORS[0])
+  const [territoryId, setTerritoryId] = useState<string>('')
   const [preset, setPreset] = useState<'standard' | 'empty' | 'custom'>('standard')
   const [customCols, setCustomCols] = useState<Set<string>>(() => new Set(STANDARD_COLUMNS.map(c => c.name)))
   const navigate = useNavigate()
   const form = useForm<BoardFormData>({ defaultValues: { color: BOARD_COLORS[0] } })
+
+  // Por defecto, el nuevo tablero se crea en el primer territorio (ej. León)
+  useEffect(() => { if (!territoryId && territories.length) setTerritoryId(territories[0].id) }, [territories, territoryId])
 
   function toggleCustomCol(name: string) {
     setCustomCols(prev => {
@@ -58,7 +63,7 @@ export function Boards() {
         cols = STANDARD_COLUMNS.filter(c => customCols.has(c.name))
         if (cols.length === 0) cols = [{ name: 'Nuevo lead', color: '#6B7280' }]
       }
-      const board = await createBoard({ ...data, color: selectedColor }, cols)
+      const board = await createBoard({ ...data, color: selectedColor, territory_id: territoryId || null }, cols)
       toast.success('Tablero creado')
       setOpen(false)
       form.reset()
@@ -173,6 +178,18 @@ export function Boards() {
                   ))}
                 </div>
               </div>
+              {territories.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label>Territorio (zona / provincia)</Label>
+                  <Select value={territoryId || 'none'} onValueChange={v => setTerritoryId(v === 'none' ? '' : v)}>
+                    <SelectTrigger><SelectValue placeholder="Sin territorio" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sin territorio</SelectItem>
+                      {territories.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               {/* Columnas iniciales */}
               <div className="space-y-2">
                 <Label>Columnas del tablero</Label>
@@ -243,16 +260,32 @@ export function Boards() {
             Crear tablero
           </Button>
         </div>
-      ) : (
+      ) : territories.length === 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {boards.map((board) => (
-            <BoardCard
-              key={board.id}
-              board={board}
-              onClick={() => navigate(`/boards/${board.id}`)}
-              onDelete={() => setDeleteTarget(board)}
-            />
+            <BoardCard key={board.id} board={board} onClick={() => navigate(`/boards/${board.id}`)} onDelete={() => setDeleteTarget(board)} />
           ))}
+        </div>
+      ) : (
+        <div className="space-y-8">
+          {[...territories, null].map((terr) => {
+            const list = boards.filter((b) => (b.territory_id ?? null) === (terr?.id ?? null))
+            if (list.length === 0) return null
+            return (
+              <section key={terr?.id ?? 'none'}>
+                <div className="flex items-center gap-2 mb-3">
+                  <MapPin className="h-4 w-4 text-primary-600 shrink-0" />
+                  <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">{terr?.name ?? 'Sin territorio'}</h2>
+                  <span className="text-xs text-gray-400">· {list.length} {list.length === 1 ? 'tablero' : 'tableros'}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {list.map((board) => (
+                    <BoardCard key={board.id} board={board} onClick={() => navigate(`/boards/${board.id}`)} onDelete={() => setDeleteTarget(board)} />
+                  ))}
+                </div>
+              </section>
+            )
+          })}
         </div>
       )}
 

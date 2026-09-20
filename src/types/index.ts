@@ -65,9 +65,19 @@ export interface Board {
   website_url: string | null
   color: string
   created_at: string
+  territory_id?: string | null   // zona/provincia a la que pertenece (null = sin territorio)
+  vertical_key?: string | null   // gremio/vertical (carpinteria, pintura…)
   columns?: BoardColumn[]
   lead_count?: number      // total de leads activos del tablero
   new_count?: number       // leads nuevos (creados en las últimas 48 h)
+}
+
+export interface Territory {
+  id: string
+  org_id: string
+  name: string
+  slug: string | null
+  created_at: string
 }
 
 export interface BoardColumn {
