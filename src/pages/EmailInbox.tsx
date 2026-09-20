@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Mail, CheckCircle2, XCircle, AlertTriangle, Inbox, ArrowRight, Sparkles } from 'lucide-react'
+import { Mail, CheckCircle2, XCircle, AlertTriangle, Inbox, ArrowRight, Sparkles, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -25,6 +25,8 @@ const STATUS_META: Record<string, { label: string; color: string; icon: typeof C
   created:              { label: 'Creado',                 color: 'bg-green-100 text-green-700',  icon: CheckCircle2 },
   discarded_ai:         { label: 'Descartado (basura)',    color: 'bg-gray-100 text-gray-600',    icon: XCircle },
   discarded_no_contact: { label: 'Descartado (sin datos)', color: 'bg-gray-100 text-gray-600',    icon: XCircle },
+  discarded_manual:     { label: 'Descartado (manual)',    color: 'bg-gray-100 text-gray-600',    icon: XCircle },
+  appended:             { label: 'Añadido a lead',         color: 'bg-blue-100 text-blue-700',    icon: CheckCircle2 },
   no_route:             { label: 'Sin tablero',            color: 'bg-amber-100 text-amber-700',  icon: AlertTriangle },
   error:                { label: 'Error',                  color: 'bg-red-100 text-red-700',      icon: AlertTriangle },
 }
@@ -38,6 +40,9 @@ export function EmailInbox() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<Filter>('all')
   const [rescuing, setRescuing] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const isLeadStatus = (s: string) => s === 'created' || s === 'appended'
 
   useEffect(() => { if (organization) load() }, [organization?.id])
 
@@ -97,13 +102,35 @@ export function EmailInbox() {
     }
   }
 
+  // Descartar un email (pasa a "Descartados"; no borra ningún lead ya creado)
+  async function discardOne(ev: EmailEvent) {
+    const prev = events
+    setEvents(list => list.map(e => e.id === ev.id ? { ...e, status: 'discarded_manual', reason: 'Descartado manualmente' } : e))
+    const { error } = await supabase.from('email_ingest_events').update({ status: 'discarded_manual', reason: 'Descartado manualmente' }).eq('id', ev.id)
+    if (error) { setEvents(prev); toast.error('No se pudo descartar') }
+  }
+
+  // Eliminar definitivamente todos los descartados
+  async function deleteDiscarded() {
+    if (!organization) return
+    const ids = events.filter(e => !isLeadStatus(e.status)).map(e => e.id)
+    if (ids.length === 0) { toast.info('No hay descartados que eliminar'); return }
+    if (!window.confirm(`¿Eliminar definitivamente ${ids.length} email(s) descartado(s)? No afecta a los leads ya creados.`)) return
+    setDeleting(true)
+    const { error } = await supabase.from('email_ingest_events').delete().in('id', ids)
+    setDeleting(false)
+    if (error) { toast.error('No se pudieron eliminar'); return }
+    setEvents(list => list.filter(e => isLeadStatus(e.status)))
+    toast.success(`${ids.length} descartado(s) eliminado(s)`)
+  }
+
   const filtered = events.filter(e =>
-    filter === 'all' ? true : filter === 'created' ? e.status === 'created' : e.status !== 'created')
+    filter === 'all' ? true : filter === 'created' ? isLeadStatus(e.status) : !isLeadStatus(e.status))
 
   const counts = {
     all: events.length,
-    created: events.filter(e => e.status === 'created').length,
-    discarded: events.filter(e => e.status !== 'created').length,
+    created: events.filter(e => isLeadStatus(e.status)).length,
+    discarded: events.filter(e => !isLeadStatus(e.status)).length,
   }
 
   return (
@@ -113,13 +140,20 @@ export function EmailInbox() {
         <p className="text-gray-500 text-sm mt-1">Emails de los formularios web: cuáles se convirtieron en lead y cuáles se descartaron (y por qué). Puedes rescatar cualquiera.</p>
       </div>
 
-      <div className="flex gap-2">
-        {([['all', `Todos (${counts.all})`], ['created', `Leads (${counts.created})`], ['discarded', `Descartados (${counts.discarded})`]] as const).map(([k, label]) => (
-          <button key={k} onClick={() => setFilter(k)}
-            className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${filter === k ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
-            {label}
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap">
+          {([['all', `Todos (${counts.all})`], ['created', `Leads (${counts.created})`], ['discarded', `Descartados (${counts.discarded})`]] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setFilter(k)}
+              className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${filter === k ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {counts.discarded > 0 && (
+          <Button variant="outline" size="sm" className="gap-1.5 text-xs text-red-600 border-red-200 hover:bg-red-50" disabled={deleting} onClick={deleteDiscarded}>
+            <Trash2 className="h-3.5 w-3.5" />{deleting ? 'Eliminando…' : `Eliminar descartados (${counts.discarded})`}
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -152,16 +186,21 @@ export function EmailInbox() {
                     </div>
                     <span className="text-[11px] text-gray-400 shrink-0">{formatRelativeTime(ev.created_at)}</span>
                   </div>
-                  <div className="flex justify-end mt-2">
-                    {ev.status === 'created' && ev.lead_id ? (
+                  <div className="flex justify-end items-center gap-2 mt-2">
+                    {ev.status !== 'discarded_manual' && (
+                      <Button variant="ghost" size="sm" className="gap-1.5 text-xs text-gray-400 hover:text-red-500" onClick={() => discardOne(ev)}>
+                        <X className="h-3.5 w-3.5" />Descartar
+                      </Button>
+                    )}
+                    {isLeadStatus(ev.status) && ev.lead_id ? (
                       <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => navigate(`/leads/${ev.lead_id}`)}>
                         Ver lead <ArrowRight className="h-3.5 w-3.5" />
                       </Button>
-                    ) : (
+                    ) : !isLeadStatus(ev.status) ? (
                       <Button variant="outline" size="sm" className="gap-1.5 text-xs" disabled={rescuing === ev.id} onClick={() => rescue(ev)}>
                         <Sparkles className="h-3.5 w-3.5" />{rescuing === ev.id ? 'Creando…' : 'Convertir en lead'}
                       </Button>
-                    )}
+                    ) : null}
                   </div>
                 </CardContent>
               </Card>
