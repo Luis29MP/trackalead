@@ -316,18 +316,40 @@ export function Boards() {
           ))}
         </div>
       ) : openGroupId === null ? (
-        // ── RAÍZ: tarjetas de grupo (León, empresas…) ─────────────────────────
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {territories.map((t) => {
-            const list = boards.filter(b => b.territory_id === t.id)
-            const leads = list.reduce((s, b) => s + (b.lead_count ?? 0), 0)
-            return <GroupCard key={t.id} name={t.name} kind={t.kind} boardCount={list.length} leadCount={leads} onClick={() => setOpenGroupId(t.id)} />
+        // ── RAÍZ: grupos por tipo (Zonas / Empresas / Otros) ──────────────────
+        <div className="space-y-8">
+          {([
+            { kind: 'zona', title: 'Zonas' },
+            { kind: 'empresa', title: 'Empresas' },
+            { kind: 'otro', title: 'Otros' },
+          ] as const).map(({ kind, title }) => {
+            const groups = territories.filter(t => t.kind === kind)
+            if (groups.length === 0) return null
+            return (
+              <section key={kind}>
+                <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">{title}</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {groups.map((t) => {
+                    const list = boards.filter(b => b.territory_id === t.id)
+                    const leads = list.reduce((s, b) => s + (b.lead_count ?? 0), 0)
+                    return <GroupCard key={t.id} name={t.name} kind={t.kind} boardCount={list.length} leadCount={leads} onClick={() => setOpenGroupId(t.id)} />
+                  })}
+                </div>
+              </section>
+            )
           })}
-          {boards.some(b => !b.territory_id) && (() => {
-            const list = boards.filter(b => !b.territory_id)
-            const leads = list.reduce((s, b) => s + (b.lead_count ?? 0), 0)
-            return <GroupCard name="Sin grupo" kind="otro" boardCount={list.length} leadCount={leads} onClick={() => setOpenGroupId('__none__')} />
-          })()}
+          {boards.some(b => !b.territory_id) && (
+            <section>
+              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Sin grupo</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {(() => {
+                  const list = boards.filter(b => !b.territory_id)
+                  const leads = list.reduce((s, b) => s + (b.lead_count ?? 0), 0)
+                  return <GroupCard name="Sin grupo" kind="otro" boardCount={list.length} leadCount={leads} onClick={() => setOpenGroupId('__none__')} />
+                })()}
+              </div>
+            </section>
+          )}
         </div>
       ) : (
         // ── DENTRO DE UN GRUPO: sus tableros ──────────────────────────────────
