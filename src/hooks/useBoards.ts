@@ -22,9 +22,9 @@ export function useTerritories() {
     setLoading(false)
   }
 
-  async function createTerritory(name: string, slug: string | null, verticals: string[]) {
+  async function createTerritory(name: string, slug: string | null, verticals: string[], kind: string = 'zona') {
     const { data, error } = await supabase.rpc('create_territory', {
-      p_org: organization!.id, p_name: name, p_slug: slug, p_verticals: verticals,
+      p_org: organization!.id, p_name: name, p_slug: slug, p_verticals: verticals, p_kind: kind,
     })
     if (error) throw error
     await load()

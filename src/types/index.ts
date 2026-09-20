@@ -72,11 +72,16 @@ export interface Board {
   new_count?: number       // leads nuevos (creados en las últimas 48 h)
 }
 
+export type TerritoryKind = 'zona' | 'empresa' | 'otro'
+
+// Grupo de tableros: puede ser una zona geográfica, una empresa/cliente
+// recurrente, u otra agrupación. (Nombre interno de tabla: "territories".)
 export interface Territory {
   id: string
   org_id: string
   name: string
   slug: string | null
+  kind: TerritoryKind
   created_at: string
 }
 

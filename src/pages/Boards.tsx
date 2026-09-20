@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Globe, Layers, Check, Trash2, Users, Sparkles, Download, MapPin } from 'lucide-react'
+import { Plus, Globe, Layers, Check, Trash2, Users, Sparkles, Download, MapPin, Building2 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
@@ -180,12 +180,12 @@ export function Boards() {
               </div>
               {territories.length > 0 && (
                 <div className="space-y-1.5">
-                  <Label>Territorio (zona / provincia)</Label>
+                  <Label>Grupo (zona o empresa)</Label>
                   <Select value={territoryId || 'none'} onValueChange={v => setTerritoryId(v === 'none' ? '' : v)}>
-                    <SelectTrigger><SelectValue placeholder="Sin territorio" /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Sin grupo" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">Sin territorio</SelectItem>
-                      {territories.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                      <SelectItem value="none">Sin grupo</SelectItem>
+                      {territories.map(t => <SelectItem key={t.id} value={t.id}>{t.name}{t.kind !== 'zona' ? ` · ${t.kind}` : ''}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -274,8 +274,12 @@ export function Boards() {
             return (
               <section key={terr?.id ?? 'none'}>
                 <div className="flex items-center gap-2 mb-3">
-                  <MapPin className="h-4 w-4 text-primary-600 shrink-0" />
-                  <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">{terr?.name ?? 'Sin territorio'}</h2>
+                  {terr?.kind === 'empresa'
+                    ? <Building2 className="h-4 w-4 text-primary-600 shrink-0" />
+                    : terr ? <MapPin className="h-4 w-4 text-primary-600 shrink-0" />
+                    : <Layers className="h-4 w-4 text-gray-400 shrink-0" />}
+                  <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">{terr?.name ?? 'Sin grupo'}</h2>
+                  {terr && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 capitalize">{terr.kind}</span>}
                   <span className="text-xs text-gray-400">· {list.length} {list.length === 1 ? 'tablero' : 'tableros'}</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
