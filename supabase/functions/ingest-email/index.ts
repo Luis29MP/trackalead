@@ -93,6 +93,16 @@ serve(async (req) => {
     try { await admin.from('email_ingest_events').insert(row) } catch { /* no romper por el log */ }
   }
 
+  // Limpieza de la bandeja para que no crezca infinita (best-effort, no bloquea):
+  // descartados/sin ruta/errores > 15 días, y cualquier evento > 60 días.
+  try {
+    const d15 = new Date(Date.now() - 15 * 86400000).toISOString()
+    const d60 = new Date(Date.now() - 60 * 86400000).toISOString()
+    await admin.from('email_ingest_events').delete()
+      .in('status', ['discarded_no_contact', 'discarded_ai', 'no_route', 'error']).lt('created_at', d15)
+    await admin.from('email_ingest_events').delete().lt('created_at', d60)
+  } catch { /* limpieza no crítica */ }
+
   try {
     const body = await req.json().catch(() => ({})) as Record<string, unknown>
 
@@ -179,6 +189,42 @@ serve(async (req) => {
       `Asunto: ${subject}`,
       text.slice(0, 1500),
     ].filter(v => v !== undefined).join('\n')
+
+    // 3.5) Deduplicación: ¿ya hay un lead abierto del mismo contacto en este tablero
+    //      (últimos 30 días)? El cliente suele mandar varios correos del mismo trabajo.
+    //      Si lo hay, AÑADIMOS la info a ese lead en vez de crear uno nuevo.
+    const dupOr: string[] = []
+    if (phone) dupOr.push(`phone.eq.${phone}`)
+    if (email) dupOr.push(`email.eq.${email.replace(/,/g, '')}`)
+    if (dupOr.length) {
+      const since = new Date(Date.now() - 30 * 86400000).toISOString()
+      const { data: dup } = await admin.from('leads')
+        .select('id, notes, phone, email, zone, concept, is_read')
+        .eq('board_id', route.board_id).eq('is_archived', false).gte('created_at', since)
+        .or(dupOr.join(','))
+        .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      if (dup) {
+        const fecha = new Date().toLocaleDateString('es-ES')
+        const addBlock = [`📧 Correo adicional (${fecha}) — mismo cliente`, `Asunto: ${subject}`, text.slice(0, 1500)].join('\n')
+        const mergedNotes = `${addBlock}\n\n— — —\n\n${dup.notes ?? ''}`.slice(0, 8000)
+        await admin.from('leads').update({
+          notes: mergedNotes,
+          phone: dup.phone || phone || null,
+          email: dup.email || email || null,
+          zone: dup.zone || zone || null,
+          concept: dup.concept || concept || null,
+          is_read: false, updated_at: new Date().toISOString(),
+        }).eq('id', dup.id)
+        await log({ org_id: route.org_id, board_id: route.board_id, route_key: route.key, status: 'appended', reason: 'mismo contacto y tablero (≤30 días)', from_addr: from, subject, raw_excerpt: excerpt, lead_id: dup.id })
+        // Aviso in-app de info adicional (no WhatsApp, para no duplicar avisos)
+        try {
+          const { data: members } = await admin.from('org_members').select('user_id').eq('org_id', route.org_id).in('role', ['owner', 'admin', 'manager'])
+          const rows = (members ?? []).filter(m => m.user_id).map(m => ({ user_id: m.user_id, title: `📧 Info adicional de ${name}`, body: `El cliente ha enviado otro correo${concept ? ` · ${concept}` : ''}. Añadido a su lead.`, lead_id: dup.id, is_read: false }))
+          if (rows.length) await admin.from('notifications').insert(rows)
+        } catch { /* aviso no crítico */ }
+        return json({ ok: true, appended: true, lead_id: dup.id })
+      }
+    }
 
     // 4) Crear el lead arriba de la primera columna del tablero
     const { data: col } = await admin.from('board_columns').select('id').eq('board_id', route.board_id).order('position', { ascending: true }).limit(1).maybeSingle()
