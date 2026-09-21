@@ -13,7 +13,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import {
   Plus, ArrowLeft, Wrench, MapPin, ChevronLeft, ChevronRight,
-  ClipboardPaste, Calendar, Settings2, Trash2, ArrowUp, ArrowDown, Save,
+  ClipboardPaste, Calendar, Settings2, Trash2, ArrowUp, ArrowDown, Save, Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBoardColumns } from '@/hooks/useBoards'
@@ -162,6 +162,12 @@ function LeadCard({ lead, columns, onClick, onMove }: {
         {/* Footer: estado presupuesto + importe + fecha */}
         <div className="flex items-center justify-between gap-1 mt-1.5 pt-1.5 border-t border-gray-100">
           <div className="flex items-center gap-1.5 min-w-0">
+            {lead.has_orientativo && (
+              <span title="Se ha enviado un presupuesto orientativo"
+                className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 bg-amber-100 text-amber-700">
+                <Sparkles className="h-2.5 w-2.5" />Orientativo
+              </span>
+            )}
             {lead.budget_state && (
               <span title={BUDGET_STATE_META[lead.budget_state].label}
                 className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${BUDGET_STATE_META[lead.budget_state].color}`}>

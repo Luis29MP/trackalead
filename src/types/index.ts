@@ -116,6 +116,7 @@ export interface Lead {
   is_read: boolean            // false = badge "NUEVO"
   position: number | null     // orden manual dentro de la columna (p. ej. orden de Trello)
   budget_state?: BudgetState | null   // estado de presupuesto/factura (calculado, no en BD)
+  has_orientativo?: boolean           // tiene un presupuesto orientativo (calculado, no en BD)
   public_token: string | null // token para enlace público compartible
   budget_amount: number | null
   commission_amount: number | null
@@ -279,6 +280,12 @@ export interface Budget {
   commission_paid?: boolean            // comisión cobrada
   accepted_at?: string | null          // aceptado por el cliente → firme
   rejected_at?: string | null          // rechazado/caducado
+  type?: 'orientativo' | 'cerrado'     // orientativo (estimación a distancia) o cerrado (el habitual)
+  parent_budget_id?: string | null     // el cerrado referencia al orientativo previo
+  price_min?: number | null            // horquilla del orientativo
+  price_max?: number | null
+  legal_text?: string | null           // snapshot del texto legal mostrado al emitir
+  legal_version?: number | null
   created_at: string
   updated_at: string
 }

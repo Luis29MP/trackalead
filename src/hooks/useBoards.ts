@@ -181,15 +181,19 @@ export function useBoardColumns(boardId: string) {
       // Estado de presupuesto/factura por lead (para los badges de la tarjeta)
       const leadIds = (leads ?? []).map(l => l.id)
       const stateByLead: Record<string, BudgetState | null> = {}
+      const orientByLead: Record<string, boolean> = {}
       if (leadIds.length) {
         const { computeBudgetState } = await import('@/lib/budgetState')
         const [{ data: bgs }, { data: invs }] = await Promise.all([
-          supabase.from('budgets').select('lead_id, status, validated_at').in('lead_id', leadIds),
+          supabase.from('budgets').select('lead_id, status, validated_at, type').in('lead_id', leadIds),
           supabase.from('invoices').select('lead_id').in('lead_id', leadIds),
         ])
         const invSet = new Set((invs ?? []).map(i => i.lead_id))
         const byLead: Record<string, { status: string; validated_at: string | null }[]> = {}
-        for (const b of bgs ?? []) (byLead[b.lead_id] ??= []).push(b)
+        for (const b of bgs ?? []) {
+          (byLead[b.lead_id] ??= []).push(b)
+          if ((b as { type?: string }).type === 'orientativo') orientByLead[b.lead_id] = true
+        }
         for (const lid of leadIds) stateByLead[lid] = computeBudgetState(byLead[lid] ?? [], invSet.has(lid))
       }
 
@@ -197,7 +201,7 @@ export function useBoardColumns(boardId: string) {
         cols.map((col) => ({
           ...col,
           leads: (leads ?? []).filter((l) => l.column_id === col.id)
-            .map(l => ({ ...l, budget_state: stateByLead[l.id] ?? null })),
+            .map(l => ({ ...l, budget_state: stateByLead[l.id] ?? null, has_orientativo: !!orientByLead[l.id] })),
         }))
       )
     } catch {

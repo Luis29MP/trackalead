@@ -73,6 +73,7 @@ export interface Draft {
   notes: string
   status: BudgetStatus
   images: ImgItem[]
+  type?: 'orientativo' | 'cerrado'
 }
 
 export function emptyDraft(): Draft {
@@ -80,6 +81,7 @@ export function emptyDraft(): Draft {
     lead_id: null, client_name: '', client_phone: '', client_address: '', concept: '',
     work_notes: '', professional_id: null, margin_percent: 20, ai_instructions: '',
     lines: [], vat_percent: 21, validity_days: 30, notes: '', status: 'draft', images: [],
+    type: 'cerrado',
   }
 }
 
@@ -183,6 +185,7 @@ export function Budgets() {
       notes: b.notes ?? '',
       status: b.status ?? 'draft',
       images: [],
+      type: b.type ?? 'cerrado',
     })
     setWizardOpen(true)
   }
@@ -537,6 +540,38 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
   const [splitMode, setSplitMode] = useState(false)
   const [splitResults, setSplitResults] = useState<Budget[] | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [legalOrient, setLegalOrient] = useState<{ content: string; version: number } | null>(null)
+
+  const isOrient = draft.type === 'orientativo'
+
+  // Texto legal orientativo vigente (override de la org si existe, si no el global)
+  useEffect(() => {
+    let alive = true
+    supabase.from('legal_texts').select('org_id, content, version').eq('kind', 'orientativo').eq('active', true)
+      .then(({ data }) => {
+        if (!alive || !data?.length) return
+        const own = data.find(r => r.org_id === orgId)
+        const chosen = own ?? data.find(r => r.org_id === null) ?? data[0]
+        setLegalOrient({ content: chosen.content, version: chosen.version })
+      })
+    return () => { alive = false }
+  }, [orgId])
+
+  // Campos de tipo/legal para los inserts (snapshot del texto al emitir)
+  const typeFields = (): { type: string; legal_text: string | null; legal_version: number | null } =>
+    isOrient
+      ? { type: 'orientativo', legal_text: legalOrient?.content ?? null, legal_version: legalOrient?.version ?? null }
+      : { type: 'cerrado', legal_text: null, legal_version: null }
+
+  // Al CREAR un presupuesto, el lead pasa a "Presupuestado"
+  async function moveLeadToPresupuestado(leadId: string | null) {
+    if (!leadId) return
+    const { data: lead } = await supabase.from('leads').select('board_id').eq('id', leadId).maybeSingle()
+    if (!lead?.board_id) return
+    const { data: cols } = await supabase.from('board_columns').select('id, name').eq('board_id', lead.board_id)
+    const col = (cols ?? []).find(c => /presupuestad/i.test(c.name))
+    if (col) await supabase.from('leads').update({ column_id: col.id, updated_at: new Date().toISOString() }).eq('id', leadId)
+  }
 
   const totals = useMemo(() => recalc(draft.lines, draft.vat_percent), [draft.lines, draft.vat_percent])
 
@@ -676,10 +711,12 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
         notes: notes || null,
         status: 'draft',
         ai_generated: true,
+        ...typeFields(),
         updated_at: now,
       }).select().single()
       if (data) created.push(data as Budget)
     }
+    await moveLeadToPresupuestado(draft.lead_id)
     setSplitResults(created)
     onSaved()
   }
@@ -709,6 +746,7 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
         notes: r.notes || null,
         status: 'draft',
         ai_generated: true,
+        ...typeFields(),
         updated_at: now,
       }).select().single()
       if (data) {
@@ -717,6 +755,7 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
         await syncPartida(data.id, draft.professional_id, r.trade, r.lines, t.subtotal)
       }
     }
+    await moveLeadToPresupuestado(draft.lead_id)
     setSplitResults(created)
     onSaved()
   }
@@ -775,6 +814,7 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
       notes: draft.notes || null,
       status: draft.status,
       ai_generated: true,
+      ...typeFields(),
       updated_at: new Date().toISOString(),
     }
     try {
@@ -785,7 +825,7 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
       } else {
         const { data } = await supabase.from('budgets').insert(payload).select().single()
         result = data as Budget
-        if (result) setSavedId(result.id)
+        if (result) { setSavedId(result.id); await moveLeadToPresupuestado(draft.lead_id) }
       }
       if (result) await syncPartida(result.id, draft.professional_id, draft.concept || 'General', draft.lines, totals.subtotal)
       toast.success('Presupuesto guardado')
@@ -940,6 +980,30 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
               <p className="text-xs text-gray-400">{[draft.concept, draft.client_phone].filter(Boolean).join(' · ') || '—'}</p>
             </div>
 
+            {/* Tipo de presupuesto */}
+            <div className="space-y-1.5">
+              <Label>Tipo de presupuesto</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setDraft(d => ({ ...d, type: 'cerrado' }))}
+                  className={`rounded-lg border p-3 text-left ${!isOrient ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500' : 'border-gray-200 hover:border-gray-300'}`}>
+                  <p className="text-sm font-semibold text-gray-800">Cerrado</p>
+                  <p className="text-[11px] text-gray-400">Precio de trabajo, el habitual</p>
+                </button>
+                <button type="button" onClick={() => setDraft(d => ({ ...d, type: 'orientativo' }))}
+                  className={`rounded-lg border p-3 text-left ${isOrient ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500' : 'border-gray-200 hover:border-gray-300'}`}>
+                  <p className="text-sm font-semibold text-gray-800">Orientativo</p>
+                  <p className="text-[11px] text-gray-400">Estimación a distancia, sin visita</p>
+                </button>
+              </div>
+              {isOrient && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-1 space-y-1.5">
+                  <p className="text-[11px] font-bold text-amber-700 uppercase tracking-wide">Orientativo · Sin valor contractual</p>
+                  <p className="text-[11px] text-amber-800 leading-snug">{legalOrient?.content ?? 'Cargando el texto legal…'}</p>
+                  <p className="text-[10px] text-amber-600">Este texto se adjunta al presupuesto como aviso legal (no editable).</p>
+                </div>
+              )}
+            </div>
+
             <div className="space-y-1.5">
               <Label>Profesional asignado (opcional)</Label>
               <Select value={draft.professional_id ?? 'none'} onValueChange={v => setDraft(d => ({ ...d, professional_id: v === 'none' ? null : v }))}>
@@ -965,7 +1029,6 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
                 onChange={e => setDraft(d => ({ ...d, margin_percent: Number(e.target.value) }))}
                 className="w-full accent-primary-600"
               />
-              <p className="text-[11px] text-gray-400">Por defecto 20% para asegurar margen ("tirar para arriba").</p>
             </div>
 
             <div className="space-y-1.5">
