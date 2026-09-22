@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   DndContext, DragOverlay, closestCenter,
-  KeyboardSensor, PointerSensor, useSensor, useSensors,
+  KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors,
   type DragStartEvent, type DragEndEvent,
 } from '@dnd-kit/core'
 import { useDroppable } from '@dnd-kit/core'
@@ -469,7 +469,10 @@ export function KanbanBoard() {
   const [nameInput, setNameInput] = useState('')
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    // Ratón: arrastra al mover 8px. Táctil: mantén pulsado 200ms para arrastrar
+    // (el toque corto abre el lead y permite hacer scroll con el dedo).
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 

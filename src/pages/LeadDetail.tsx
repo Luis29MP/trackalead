@@ -466,7 +466,7 @@ export function LeadDetail() {
   // ── Presupuestos del lead ──────────────────────────────────────────────────
   function budgetIssuer(b: Budget): PdfOrgInfo {
     const pro = professionals.find(p => p.id === b.professional_id)
-    if (pro && (pro.company_name || pro.logo_url)) {
+    if (pro) {
       const addr = [pro.address, pro.cif ? `NIF: ${pro.cif}` : null].filter(Boolean).join('  ·  ')
       return { name: pro.company_name || pro.name, phone: pro.phone, email: pro.email, address: addr || null, logoUrl: pro.logo_url ?? null }
     }
@@ -509,7 +509,7 @@ export function LeadDetail() {
   // ── Facturas del lead ───────────────────────────────────────────────────────
   function invoiceIssuer(inv: Invoice): PdfOrgInfo {
     const pro = professionals.find(p => p.id === inv.professional_id)
-    if (pro && (pro.company_name || pro.logo_url)) {
+    if (pro) {
       const addr = [pro.address, pro.cif ? `NIF: ${pro.cif}` : null].filter(Boolean).join('  ·  ')
       return { name: pro.company_name || pro.name, phone: pro.phone, email: pro.email, address: addr || null, logoUrl: pro.logo_url ?? null }
     }

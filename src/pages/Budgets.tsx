@@ -92,11 +92,11 @@ function recalc(lines: BudgetLine[], vatPercent: number) {
   return { subtotal, vat_amount, total }
 }
 
-// Emisor del PDF: si el presupuesto tiene un profesional con datos de empresa/logo,
-// se emite a su nombre; si no, con el nombre de la organización.
+// Emisor del PDF: si el presupuesto tiene un profesional asignado, se emite a SU
+// nombre (empresa si la tiene, si no su nombre) con su membrete; si no, la org.
 function buildIssuer(budget: Budget, professionals: Professional[], orgName?: string): PdfOrgInfo {
   const pro = professionals.find(p => p.id === budget.professional_id)
-  if (pro && (pro.company_name || pro.logo_url)) {
+  if (pro) {
     const addressBits = [pro.address, pro.cif ? `NIF: ${pro.cif}` : null].filter(Boolean).join('  ·  ')
     return { name: pro.company_name || pro.name, phone: pro.phone, email: pro.email, address: addressBits || null, logoUrl: pro.logo_url ?? null }
   }
