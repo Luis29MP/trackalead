@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { generateBudget, generateBudgetSplit, splitBudgetOptions, type AiImage } from '@/lib/ai'
 import { fetchGenerationKnowledge } from '@/lib/proKnowledge'
+import { useBoards, useTerritories } from '@/hooks/useBoards'
 import { exportBudgetPdf, viewBudgetPdf, exportBudgetComparison, toClientBudget, type PdfOrgInfo } from '@/lib/budgetPdf'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
 import { ImportProBudget } from '@/components/ImportProBudget'
@@ -153,6 +154,11 @@ export function Budgets() {
   const [ownBudgets, setOwnBudgets] = useState<{ id: string; professional_id: string; client_name: string | null; concept: string | null; lines: BudgetLine[]; subtotal: number; vat_percent: number; total: number; notes: string | null; created_at: string }[]>([])
   const [memberMap, setMemberMap] = useState<Record<string, string>>({})
   const [leadVerticalById, setLeadVerticalById] = useState<Record<string, string>>({})
+  const [leadBoardById, setLeadBoardById] = useState<Record<string, string>>({})   // lead → board_id
+  const [filterTerritoryId, setFilterTerritoryId] = useState<string>('all')
+  const [filterBoardId, setFilterBoardId] = useState<string>('all')
+  const { boards } = useBoards()
+  const { territories } = useTerritories()
   const [assignBudget, setAssignBudget] = useState<Budget | null>(null)  // presupuesto al que asignar un lead
   const [assignSearch, setAssignSearch] = useState('')
 
@@ -171,19 +177,22 @@ export function Budgets() {
 
   async function loadLeadsAndPros() {
     const [{ data: leadsData }, { data: prosData }, { data: own }, { data: mem }] = await Promise.all([
-      supabase.from('leads').select('id, name, phone, address, concept, zone, notes, assigned_to, board:boards(vertical_key)').eq('org_id', organization!.id).eq('is_archived', false).order('created_at', { ascending: false }),
+      supabase.from('leads').select('id, name, phone, address, concept, zone, notes, assigned_to, board_id, board:boards(vertical_key)').eq('org_id', organization!.id).eq('is_archived', false).order('created_at', { ascending: false }),
       supabase.from('professionals').select('*').eq('org_id', organization!.id).order('name'),
       supabase.from('pro_own_budgets').select('id, professional_id, client_name, concept, lines, subtotal, vat_percent, total, notes, created_at').eq('org_id', organization!.id).order('created_at', { ascending: false }),
       supabase.from('org_members').select('user_id, profile:profiles(full_name)').eq('org_id', organization!.id),
     ])
     setLeads((leadsData ?? []) as unknown as Lead[])
-    // Mapa lead → gremio (vertical) para la referencia del presupuesto
+    // Mapas lead → gremio (vertical) y lead → tablero, para referencia/columna/filtro
     const vmap: Record<string, string> = {}
-    for (const l of (leadsData ?? []) as unknown as { id: string; board: { vertical_key: string | null } | { vertical_key: string | null }[] | null }[]) {
+    const bmap: Record<string, string> = {}
+    for (const l of (leadsData ?? []) as unknown as { id: string; board_id: string | null; board: { vertical_key: string | null } | { vertical_key: string | null }[] | null }[]) {
       const b = Array.isArray(l.board) ? l.board[0] : l.board
       if (b?.vertical_key) vmap[l.id] = b.vertical_key
+      if (l.board_id) bmap[l.id] = l.board_id
     }
     setLeadVerticalById(vmap)
+    setLeadBoardById(bmap)
     setProfessionals((prosData ?? []) as Professional[])
     setOwnBudgets((own ?? []) as typeof ownBudgets)
     const map: Record<string, string> = {}
@@ -256,6 +265,22 @@ export function Budgets() {
 
   // Referencia del presupuesto: código de gremio (del tablero del lead) + teléfono
   const refOf = (b: Budget) => budgetReference(b.lead_id ? leadVerticalById[b.lead_id] : null, b.client_phone)
+
+  // Tablero / territorio del presupuesto (vía el lead)
+  const boardOfBudget = (b: Budget) => (b.lead_id && leadBoardById[b.lead_id]) ? boards.find(bd => bd.id === leadBoardById[b.lead_id!]) : undefined
+  const territoryName = (tid?: string | null) => territories.find(t => t.id === tid)?.name ?? null
+
+  // Presupuestos filtrados por territorio/tablero
+  const visibleBudgets = budgets.filter(b => {
+    if (filterTerritoryId === 'all' && filterBoardId === 'all') return true
+    const bd = boardOfBudget(b)
+    if (filterTerritoryId !== 'all' && bd?.territory_id !== filterTerritoryId) return false
+    if (filterBoardId !== 'all' && bd?.id !== filterBoardId) return false
+    return true
+  })
+  const filtersActive = filterTerritoryId !== 'all' || filterBoardId !== 'all'
+  // Tableros del desplegable (acotados al territorio elegido)
+  const boardsForFilter = filterTerritoryId === 'all' ? boards : boards.filter(b => b.territory_id === filterTerritoryId)
 
   function exportPdf(b: Budget) {
     exportBudgetPdf(b, buildIssuer(b, professionals, organization?.name), { reference: refOf(b) })
@@ -373,6 +398,33 @@ export function Budgets() {
         </div>
       </div>
 
+      {/* Filtros por territorio (ciudad) y tablero */}
+      {(territories.length > 0 || boards.length > 0) && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Search className="h-4 w-4 text-gray-400" />
+          {territories.length > 0 && (
+            <Select value={filterTerritoryId} onValueChange={v => { setFilterTerritoryId(v); setFilterBoardId('all') }}>
+              <SelectTrigger className="w-48"><SelectValue placeholder="Territorio" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los territorios</SelectItem>
+                {territories.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          <Select value={filterBoardId} onValueChange={setFilterBoardId}>
+            <SelectTrigger className="w-48"><SelectValue placeholder="Tablero" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los tableros</SelectItem>
+              {boardsForFilter.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {filtersActive && (
+            <button onClick={() => { setFilterTerritoryId('all'); setFilterBoardId('all') }} className="text-xs text-gray-500 hover:text-primary-600 underline">Quitar filtros</button>
+          )}
+          <span className="text-xs text-gray-400 ml-auto">{visibleBudgets.length} presupuesto(s)</span>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex justify-center py-10"><div className="animate-spin h-6 w-6 border-4 border-primary-600 border-t-transparent rounded-full" /></div>
       ) : (budgets.length === 0 && ownBudgets.length === 0) ? (
@@ -388,6 +440,7 @@ export function Budgets() {
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50 text-xs text-gray-500 uppercase">
                   <th className="text-left px-4 py-3">Cliente / Lead</th>
+                  <th className="text-left px-3 py-3">Tablero</th>
                   <th className="text-left px-3 py-3">Concepto</th>
                   <th className="text-left px-3 py-3">Creado por</th>
                   <th className="text-right px-3 py-3">Total</th>
@@ -397,7 +450,7 @@ export function Budgets() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {budgets.map(b => (
+                {visibleBudgets.map(b => (
                   <tr key={b.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium">
                       {b.lead_id ? (
@@ -425,6 +478,14 @@ export function Budgets() {
                         </div>
                       )}
                       {refOf(b) && <p className="text-[11px] text-gray-400 mt-0.5">Ref: {refOf(b)}</p>}
+                    </td>
+                    <td className="px-3 py-3 text-xs">
+                      {(() => { const bd = boardOfBudget(b); return bd ? (
+                        <div className="min-w-0">
+                          <span className="text-gray-700">{bd.name}</span>
+                          {territoryName(bd.territory_id) && <span className="block text-[10px] text-gray-400">{territoryName(bd.territory_id)}</span>}
+                        </div>
+                      ) : <span className="text-gray-300">—</span> })()}
                     </td>
                     <td className="px-3 py-3 text-gray-500 max-w-[220px] truncate">{b.concept || '—'}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{creatorLabel(b)}</td>
@@ -467,9 +528,10 @@ export function Budgets() {
                     </td>
                   </tr>
                 ))}
-                {ownBudgets.map(b => (
+                {!filtersActive && ownBudgets.map(b => (
                   <tr key={`own-${b.id}`} className="hover:bg-gray-50 bg-indigo-50/30">
                     <td className="px-4 py-3 font-medium text-gray-900">{b.client_name || '—'}</td>
+                    <td className="px-3 py-3 text-gray-300 text-xs">—</td>
                     <td className="px-3 py-3 text-gray-500 max-w-[220px] truncate">{b.concept || '—'}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">👷 {proName(b.professional_id)} · <span className="text-indigo-500">trabajo propio</span></td>
                     <td className="px-3 py-3 text-right font-semibold text-gray-900">{formatCurrency(b.total)}</td>

@@ -4,7 +4,7 @@ import { DollarSign, CheckCircle, Clock, TrendingUp, Filter, ExternalLink, Check
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { useBoards } from '@/hooks/useBoards'
+import { useBoards, useTerritories } from '@/hooks/useBoards'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -61,12 +61,16 @@ export function Finances() {
   const [legacy, setLegacy] = useState<LegacyLead[]>([])
   const [loading, setLoading] = useState(true)
   const [filterBoard, setFilterBoard] = useState('all')
+  const [filterTerritory, setFilterTerritory] = useState('all')
   const [filterState, setFilterState] = useState<'all' | 'prevision' | 'confirmado' | 'cobrado' | 'rechazado'>('all')
   const [editId, setEditId] = useState<string | null>(null)
   const [editVal, setEditVal] = useState('')
   const { organization } = useAuth()
   const { boards } = useBoards()
+  const { territories } = useTerritories()
   const navigate = useNavigate()
+  const boardById = (id?: string | null) => boards.find(b => b.id === id)
+  const boardsForFilter = filterTerritory === 'all' ? boards : boards.filter(b => b.territory_id === filterTerritory)
 
   useEffect(() => { if (organization) loadData() /* eslint-disable-next-line */ }, [organization?.id])
 
@@ -155,13 +159,16 @@ export function Finances() {
     if (b.status === 'accepted') return b.commission_paid ? 'cobrado' : 'confirmado'
     return 'prevision'
   }
+  const inTerritory = (boardId?: string | null) => filterTerritory === 'all' || boardById(boardId)?.territory_id === filterTerritory
   const fBudgets = budgets.filter(b => {
     if (filterBoard !== 'all' && b.lead?.board_id !== filterBoard) return false
+    if (!inTerritory(b.lead?.board_id)) return false
     if (filterState !== 'all' && bucketOf(b) !== filterState) return false
     return true
   })
   const fLegacy = legacy.filter(l => {
     if (filterBoard !== 'all' && l.board_id !== filterBoard) return false
+    if (!inTerritory(l.board_id)) return false
     if (filterState === 'rechazado' || filterState === 'prevision') return false
     const bucket = l.commission_paid ? 'cobrado' : 'confirmado'
     if (filterState !== 'all' && bucket !== filterState) return false
@@ -221,11 +228,20 @@ export function Finances() {
       {/* Filtros */}
       <div className="flex items-center gap-3 flex-wrap">
         <Filter className="h-4 w-4 text-gray-400" />
+        {territories.length > 0 && (
+          <Select value={filterTerritory} onValueChange={(v) => { setFilterTerritory(v); setFilterBoard('all') }}>
+            <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los territorios</SelectItem>
+              {territories.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={filterBoard} onValueChange={setFilterBoard}>
           <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos los tableros</SelectItem>
-            {boards.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            {boardsForFilter.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={filterState} onValueChange={(v) => setFilterState(v as typeof filterState)}>
@@ -247,6 +263,7 @@ export function Finances() {
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500 uppercase">
                 <th className="text-left px-4 py-3">Cliente / Lead</th>
+                <th className="text-left px-3 py-3">Tablero</th>
                 <th className="text-left px-3 py-3">Concepto</th>
                 <th className="text-right px-3 py-3">Total cliente</th>
                 <th className="text-right px-3 py-3">Tu comisión</th>
@@ -257,9 +274,9 @@ export function Finances() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={7} className="text-center py-12 text-gray-400">Cargando…</td></tr>
+                <tr><td colSpan={8} className="text-center py-12 text-gray-400">Cargando…</td></tr>
               ) : (fBudgets.length === 0 && fLegacy.length === 0) ? (
-                <tr><td colSpan={7} className="text-center py-12 text-gray-400">Sin presupuestos. Genera o importa uno desde <strong>Presupuestos</strong>.</td></tr>
+                <tr><td colSpan={8} className="text-center py-12 text-gray-400">Sin presupuestos. Genera o importa uno desde <strong>Presupuestos</strong>.</td></tr>
               ) : (
                 <>
                   {fBudgets.map((b) => {
@@ -284,6 +301,14 @@ export function Finances() {
                           ) : (
                             <span className={`font-medium text-gray-900 ${bucket === 'rechazado' ? 'line-through' : ''}`}>{b.client_name || '—'}</span>
                           )}
+                        </td>
+                        <td className="px-3 py-3 text-xs">
+                          {(() => { const bd = boardById(b.lead?.board_id); return bd ? (
+                            <div className="min-w-0">
+                              <span className="text-gray-700">{bd.name}</span>
+                              {territories.find(t => t.id === bd.territory_id)?.name && <span className="block text-[10px] text-gray-400">{territories.find(t => t.id === bd.territory_id)?.name}</span>}
+                            </div>
+                          ) : <span className="text-gray-300">—</span> })()}
                         </td>
                         <td className="px-3 py-3 text-gray-500 max-w-[200px] truncate">{b.concept || '—'}</td>
                         <td className="px-3 py-3 text-right text-gray-700">{formatCurrency(b.total)}</td>
@@ -342,7 +367,8 @@ export function Finances() {
                           {l.phone && <p className="text-xs text-gray-400">{l.phone}</p>}
                         </button>
                       </td>
-                      <td className="px-3 py-3 text-gray-400 italic">Importe manual{l.board?.name ? ` · ${l.board.name}` : ''}</td>
+                      <td className="px-3 py-3 text-xs text-gray-600">{l.board?.name ?? <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-3 text-gray-400 italic">Importe manual</td>
                       <td className="px-3 py-3 text-right text-gray-700">{formatCurrency(l.budget_amount)}</td>
                       <td className="px-3 py-3 text-right font-semibold text-amber-600">{l.commission_amount ? formatCurrency(l.commission_amount) : '—'}</td>
                       <td className="px-3 py-3"><span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Manual</span></td>
