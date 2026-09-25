@@ -282,6 +282,18 @@ export function Budgets() {
   // Tableros del desplegable (acotados al territorio elegido)
   const boardsForFilter = filterTerritoryId === 'all' ? boards : boards.filter(b => b.territory_id === filterTerritoryId)
 
+  // Agrupa las opciones/alternativas del mismo trabajo (mismo group_id) en UNA fila.
+  // El representante (para comisión y acciones) es el de MENOR importe.
+  const budgetRows = (() => {
+    const m = new Map<string, Budget[]>()
+    for (const b of visibleBudgets) { const k = b.group_id ?? b.id; const arr = m.get(k); if (arr) arr.push(b); else m.set(k, [b]) }
+    return [...m.values()].map(opts => ({
+      rep: opts.reduce((mn, x) => (x.total ?? 0) < (mn.total ?? 0) ? x : mn, opts[0]),
+      opts,
+    }))
+  })()
+  const cleanConcept = (c?: string | null) => (c ?? '').replace(/\s*·\s*Opci[oó]n \d+\s*$/i, '')
+
   function exportPdf(b: Budget) {
     exportBudgetPdf(b, buildIssuer(b, professionals, organization?.name), { reference: refOf(b) })
   }
@@ -421,7 +433,7 @@ export function Budgets() {
           {filtersActive && (
             <button onClick={() => { setFilterTerritoryId('all'); setFilterBoardId('all') }} className="text-xs text-gray-500 hover:text-primary-600 underline">Quitar filtros</button>
           )}
-          <span className="text-xs text-gray-400 ml-auto">{visibleBudgets.length} presupuesto(s)</span>
+          <span className="text-xs text-gray-400 ml-auto">{budgetRows.length} presupuesto(s)</span>
         </div>
       )}
 
@@ -450,7 +462,7 @@ export function Budgets() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {visibleBudgets.map(b => (
+                {budgetRows.map(({ rep: b, opts }) => (
                   <tr key={b.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium">
                       {b.lead_id ? (
@@ -487,9 +499,19 @@ export function Budgets() {
                         </div>
                       ) : <span className="text-gray-300">—</span> })()}
                     </td>
-                    <td className="px-3 py-3 text-gray-500 max-w-[220px] truncate">{b.concept || '—'}</td>
+                    <td className="px-3 py-3 text-gray-500 max-w-[220px] truncate">
+                      {cleanConcept(b.concept) || '—'}
+                      {opts.length > 1 && <span className="text-[11px] text-primary-600"> · {opts.length} propuestas</span>}
+                    </td>
                     <td className="px-3 py-3 text-xs text-gray-600">{creatorLabel(b)}</td>
-                    <td className="px-3 py-3 text-right font-semibold text-gray-900">{formatCurrency(b.total)}</td>
+                    <td className="px-3 py-3 text-right font-semibold text-gray-900">
+                      {opts.length > 1 ? (
+                        <div>
+                          <span>{formatCurrency(Math.min(...opts.map(o => o.total ?? 0)))} – {formatCurrency(Math.max(...opts.map(o => o.total ?? 0)))}</span>
+                          <span className="block text-[10px] font-normal text-amber-600">comisión: la menor</span>
+                        </div>
+                      ) : formatCurrency(b.total)}
+                    </td>
                     <td className="px-3 py-3">
                       <div className="flex flex-wrap items-center gap-1">
                         {b.type === 'orientativo' && (

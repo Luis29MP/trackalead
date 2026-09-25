@@ -25,6 +25,7 @@ type BudgetStatus = 'draft' | 'sent' | 'accepted' | 'rejected'
 interface FinBudget {
   id: string
   lead_id: string | null
+  group_id: string | null
   client_name: string | null
   concept: string | null
   subtotal: number
@@ -78,7 +79,7 @@ export function Finances() {
     setLoading(true)
     const [{ data: bdata }, { data: ldata }] = await Promise.all([
       supabase.from('budgets')
-        .select('id, lead_id, client_name, concept, subtotal, total, status, commission_amount, commission_paid, accepted_at, rejected_at, created_at, lead:leads(name, phone, board_id)')
+        .select('id, lead_id, group_id, client_name, concept, subtotal, total, status, commission_amount, commission_paid, accepted_at, rejected_at, created_at, lead:leads(name, phone, board_id)')
         .eq('org_id', organization!.id).order('created_at', { ascending: false }),
       supabase.from('leads')
         .select('id, name, phone, budget_amount, commission_amount, commission_paid, board_id, created_at, board:boards(name)')
@@ -96,6 +97,15 @@ export function Finances() {
   }
 
   const commissionOf = (b: FinBudget) => b.commission_amount ?? r2((b.subtotal || 0) * COMM_RATE)
+
+  // Agrupa las opciones del mismo trabajo (group_id) y se queda con la de MENOR importe
+  // para la comisión. optCount = nº de propuestas del grupo (para el aviso).
+  const repBudgets: FinBudget[] = (() => {
+    const m = new Map<string, FinBudget[]>()
+    for (const b of budgets) { const k = b.group_id ?? b.id; const arr = m.get(k); if (arr) arr.push(b); else m.set(k, [b]) }
+    return [...m.values()].map(opts => opts.reduce((mn, x) => (x.total ?? 0) < (mn.total ?? 0) ? x : mn, opts[0]))
+  })()
+  const optCountOf = (b: FinBudget) => budgets.filter(x => (x.group_id ?? x.id) === (b.group_id ?? b.id)).length
 
   // Mueve el lead a la columna que cumpla el matcher (Aceptados / Rechazados)
   async function moveLead(leadId: string, match: (n: string) => boolean) {
@@ -160,7 +170,7 @@ export function Finances() {
     return 'prevision'
   }
   const inTerritory = (boardId?: string | null) => filterTerritory === 'all' || boardById(boardId)?.territory_id === filterTerritory
-  const fBudgets = budgets.filter(b => {
+  const fBudgets = repBudgets.filter(b => {
     if (filterBoard !== 'all' && b.lead?.board_id !== filterBoard) return false
     if (!inTerritory(b.lead?.board_id)) return false
     if (filterState !== 'all' && bucketOf(b) !== filterState) return false
@@ -176,10 +186,10 @@ export function Finances() {
   })
 
   // ── Totales (presupuestos + leads manuales) ──────────────────────────────────
-  const prevision = budgets.filter(b => bucketOf(b) === 'prevision').reduce((s, b) => s + commissionOf(b), 0)
-  const pendiente = budgets.filter(b => bucketOf(b) === 'confirmado').reduce((s, b) => s + commissionOf(b), 0)
+  const prevision = repBudgets.filter(b => bucketOf(b) === 'prevision').reduce((s, b) => s + commissionOf(b), 0)
+  const pendiente = repBudgets.filter(b => bucketOf(b) === 'confirmado').reduce((s, b) => s + commissionOf(b), 0)
     + legacy.filter(l => !l.commission_paid).reduce((s, l) => s + (l.commission_amount ?? 0), 0)
-  const cobrado = budgets.filter(b => bucketOf(b) === 'cobrado').reduce((s, b) => s + commissionOf(b), 0)
+  const cobrado = repBudgets.filter(b => bucketOf(b) === 'cobrado').reduce((s, b) => s + commissionOf(b), 0)
     + legacy.filter(l => l.commission_paid).reduce((s, l) => s + (l.commission_amount ?? 0), 0)
   const firme = pendiente + cobrado
 
@@ -191,7 +201,7 @@ export function Finances() {
   ]
 
   // Aviso de caducados a borrar (>15 días rechazados)
-  const caducados = budgets.filter(b => b.status === 'rejected' && daysSince(b.rejected_at) >= 15)
+  const caducados = repBudgets.filter(b => b.status === 'rejected' && daysSince(b.rejected_at) >= 15)
 
   return (
     <div className="space-y-6">
@@ -310,7 +320,10 @@ export function Finances() {
                             </div>
                           ) : <span className="text-gray-300">—</span> })()}
                         </td>
-                        <td className="px-3 py-3 text-gray-500 max-w-[200px] truncate">{b.concept || '—'}</td>
+                        <td className="px-3 py-3 text-gray-500 max-w-[200px] truncate">
+                          {(b.concept || '—').replace(/\s*·\s*Opci[oó]n \d+\s*$/i, '')}
+                          {optCountOf(b) > 1 && <span className="block text-[10px] text-amber-600">{optCountOf(b)} propuestas · cuenta la menor</span>}
+                        </td>
                         <td className="px-3 py-3 text-right text-gray-700">{formatCurrency(b.total)}</td>
                         <td className="px-3 py-3 text-right">
                           {editId === b.id ? (
