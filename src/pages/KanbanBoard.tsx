@@ -277,8 +277,15 @@ interface NewLeadForm {
 }
 const EMPTY: NewLeadForm = { name: '', company: '', concept: '', zone: '', phone: '', email: '', source: 'form', notes: '' }
 
-// "Trabajo a realizar" con el formato estándar a partir del análisis de la IA
-function formatLeadSummary(a: import('@/lib/ai').LeadAnalysis): string {
+// Código de gremio para la referencia (mismo criterio que en Presupuestos)
+const VERTICAL_CODE: Record<string, string> = {
+  carpinteria: 'C', reformas: 'R', carpinteria_metalica: 'CM', pintura: 'P',
+  placas_solares: 'PS', electricidad: 'E', fontaneria: 'F', tejados: 'T',
+}
+
+// "Trabajo a realizar" con el formato estándar a partir del análisis de la IA.
+// refCode = letra del gremio del tablero (opcional) para anteponer al teléfono.
+function formatLeadSummary(a: import('@/lib/ai').LeadAnalysis, refCode?: string): string {
   const t = new Date()
   const p = (n: number) => String(n).padStart(2, '0')
   const fecha = `${p(t.getDate())}/${p(t.getMonth() + 1)}/${String(t.getFullYear()).slice(-2)}`
@@ -286,8 +293,9 @@ function formatLeadSummary(a: import('@/lib/ai').LeadAnalysis): string {
   const zona = a.zone || 'No facilitada'
   const trabajo = a.work_type || a.concept || 'Por definir'
   const medidas = a.measures || 'Pendiente de facilitar'
+  const referencia = a.phone ? [refCode, a.phone].filter(Boolean).join(' ') : 'Sin referencia'
   return [
-    `🔖 Referencia: ${a.phone || 'Sin referencia'}`,
+    `🔖 Referencia: ${referencia}`,
     `FECHA: ${fecha}`,
     `🧑‍💼 Nombre del cliente: ${nombre}`,
     `📞 Teléfono: ${a.phone || 'No facilitado'}`,
@@ -598,7 +606,7 @@ export function KanbanBoard() {
         email:   merged.email,
         zone:    merged.zone,
         concept: merged.concept,
-        notes:   formatLeadSummary(merged),
+        notes:   formatLeadSummary(merged, board?.vertical_key ? VERTICAL_CODE[board.vertical_key] : undefined),
       }))
       setAiStatus('done')
       toast.success('Campos rellenados con IA')
