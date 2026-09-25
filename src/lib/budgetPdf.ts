@@ -170,9 +170,14 @@ function buildDoc(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: 
     const condLines = doc.splitTextToSize(safeNotes, pageW - marginX * 2)
     doc.text(condLines, marginX, afterY); afterY += condLines.length * 4.2 + 2
   }
-  doc.setFontSize(8.5); doc.setTextColor(...GRAY)
-  doc.text(`Validez del presupuesto: ${budget.validity_days} días`, marginX, afterY)
-  afterY += 12
+  // Solo añadimos la línea de validez si las notas NO la mencionan ya (evita duplicado)
+  if (!/validez/i.test(safeNotes)) {
+    doc.setFontSize(8.5); doc.setTextColor(...GRAY)
+    doc.text(`Validez del presupuesto: ${budget.validity_days} días`, marginX, afterY)
+    afterY += 12
+  } else {
+    afterY += 6
+  }
 
   // ── Aceptación del presupuesto ─────────────────────────────────────────────────
   const pageHt = doc.internal.pageSize.getHeight()
