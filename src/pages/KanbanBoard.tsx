@@ -60,7 +60,9 @@ function parsePastedText(text: string): Partial<NewLeadForm> {
   // continuación multilínea (líneas sueltas se añaden al último campo abierto).
   let lastKey: 'name'|'company'|'concept'|'zone'|'phone'|'email'|'notes'|'when'|null = null
   for (const raw of text.replace(/\r/g, '').split('\n')) {
-    const line = raw.replace(/[*_`]+/g, '').replace(/^\s*[-•·]\s*/, '').trim()
+    // Quita negritas markdown y CUALQUIER emoji/símbolo/viñeta inicial (los resúmenes
+    // de la app usan 🔖 📞 🧑‍💼 … antes de la etiqueta), para poder detectar el campo.
+    const line = raw.replace(/[*_`]+/g, '').replace(/^[^\p{L}\p{N}(¿¡]+/u, '').trim()
     if (!line) { lastKey = null; continue }
     const m = line.match(/^([A-Za-zÁÉÍÓÚáéíóúÑñ()¿?/¡!.\s]{2,45}?)\s*:\s*(.*)$/)
     if (m) {
