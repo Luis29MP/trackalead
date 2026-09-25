@@ -4,9 +4,9 @@ import { formatCurrency } from './utils'
 import type { Budget } from '@/types'
 
 // Sube el PDF del presupuesto al bucket público "budgets" y devuelve su URL pública.
-export async function uploadBudgetPdf(budget: Budget, issuer: PdfOrgInfo): Promise<string | null> {
+export async function uploadBudgetPdf(budget: Budget, issuer: PdfOrgInfo, reference?: string): Promise<string | null> {
   try {
-    const blob = budgetPdfBlob(budget, issuer)
+    const blob = budgetPdfBlob(budget, issuer, { reference })
     const path = `${budget.org_id}/${budget.id}.pdf`
     const { error } = await supabase.storage.from('budgets').upload(path, blob, {
       upsert: true,

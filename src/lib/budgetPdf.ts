@@ -30,7 +30,7 @@ function sanitizeClientNotes(text: string): string {
     .trim()
 }
 
-function buildDoc(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: boolean } = {}): { doc: jsPDF; fileName: string } {
+function buildDoc(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: boolean; reference?: string } = {}): { doc: jsPDF; fileName: string } {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const marginX = 14
@@ -98,6 +98,8 @@ function buildDoc(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: 
   const clientRows = [
     ['Nombre:', budget.client_name || '—'],
     budget.client_nif ? ['DNI/NIF:', budget.client_nif] : null,
+    budget.client_phone ? ['Teléfono:', budget.client_phone] : null,
+    opts.reference ? ['Referencia:', opts.reference] : null,
     budget.client_address ? ['Dirección:', budget.client_address] : null,
     budget.concept ? ['Trabajo:', budget.concept] : null,
   ].filter(Boolean) as [string, string][]
@@ -225,13 +227,13 @@ function buildDoc(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: 
 }
 
 // Descarga el PDF
-export function exportBudgetPdf(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: boolean } = {}) {
+export function exportBudgetPdf(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: boolean; reference?: string } = {}) {
   const { doc, fileName } = buildDoc(budget, org, opts)
   doc.save(fileName)
 }
 
 // Abre el PDF en una pestaña nueva del navegador (sin descargar) — para revisar/validar
-export function viewBudgetPdf(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: boolean } = {}) {
+export function viewBudgetPdf(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: boolean; reference?: string } = {}) {
   const { doc } = buildDoc(budget, org, opts)
   const url = doc.output('bloburl') as unknown as string
   window.open(url, '_blank', 'noopener')
@@ -350,7 +352,7 @@ export function exportBudgetComparison(budgets: Budget[], org: PdfOrgInfo = {}) 
 }
 
 // Devuelve el PDF como Blob (para subirlo a Storage y compartir por WhatsApp)
-export function budgetPdfBlob(budget: Budget, org: PdfOrgInfo = {}): Blob {
-  const { doc } = buildDoc(budget, org)
+export function budgetPdfBlob(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: boolean; reference?: string } = {}): Blob {
+  const { doc } = buildDoc(budget, org, opts)
   return doc.output('blob')
 }

@@ -125,6 +125,18 @@ function normName(s?: string | null): string {
 const isAcceptedCol = (n: string) => /^acept/i.test(n.trim())
 const isRejectedCol = (n: string) => /rechazad|no cerrad|no acept/i.test(n)
 
+// Código de gremio para la referencia del presupuesto
+const VERTICAL_CODE: Record<string, string> = {
+  carpinteria: 'C', reformas: 'R', carpinteria_metalica: 'CM', pintura: 'P',
+  placas_solares: 'PS', electricidad: 'E', fontaneria: 'F', tejados: 'T',
+}
+// Referencia = código de gremio + teléfono del cliente (ej. "R 685316520")
+function budgetReference(vertical: string | null | undefined, phone: string | null | undefined): string {
+  const code = vertical ? (VERTICAL_CODE[vertical] ?? '') : ''
+  const tel = (phone ?? '').replace(/[^\d+]/g, '')
+  return [code, tel].filter(Boolean).join(' ')
+}
+
 export function Budgets() {
   const { organization, user } = useAuth()
   const navigate = useNavigate()
@@ -140,6 +152,7 @@ export function Budgets() {
   const [importProOpen, setImportProOpen] = useState(false)
   const [ownBudgets, setOwnBudgets] = useState<{ id: string; professional_id: string; client_name: string | null; concept: string | null; lines: BudgetLine[]; subtotal: number; vat_percent: number; total: number; notes: string | null; created_at: string }[]>([])
   const [memberMap, setMemberMap] = useState<Record<string, string>>({})
+  const [leadVerticalById, setLeadVerticalById] = useState<Record<string, string>>({})
   const [assignBudget, setAssignBudget] = useState<Budget | null>(null)  // presupuesto al que asignar un lead
   const [assignSearch, setAssignSearch] = useState('')
 
@@ -158,12 +171,19 @@ export function Budgets() {
 
   async function loadLeadsAndPros() {
     const [{ data: leadsData }, { data: prosData }, { data: own }, { data: mem }] = await Promise.all([
-      supabase.from('leads').select('id, name, phone, address, concept, zone, notes, assigned_to').eq('org_id', organization!.id).eq('is_archived', false).order('created_at', { ascending: false }),
+      supabase.from('leads').select('id, name, phone, address, concept, zone, notes, assigned_to, board:boards(vertical_key)').eq('org_id', organization!.id).eq('is_archived', false).order('created_at', { ascending: false }),
       supabase.from('professionals').select('*').eq('org_id', organization!.id).order('name'),
       supabase.from('pro_own_budgets').select('id, professional_id, client_name, concept, lines, subtotal, vat_percent, total, notes, created_at').eq('org_id', organization!.id).order('created_at', { ascending: false }),
       supabase.from('org_members').select('user_id, profile:profiles(full_name)').eq('org_id', organization!.id),
     ])
-    setLeads((leadsData ?? []) as Lead[])
+    setLeads((leadsData ?? []) as unknown as Lead[])
+    // Mapa lead → gremio (vertical) para la referencia del presupuesto
+    const vmap: Record<string, string> = {}
+    for (const l of (leadsData ?? []) as unknown as { id: string; board: { vertical_key: string | null } | { vertical_key: string | null }[] | null }[]) {
+      const b = Array.isArray(l.board) ? l.board[0] : l.board
+      if (b?.vertical_key) vmap[l.id] = b.vertical_key
+    }
+    setLeadVerticalById(vmap)
     setProfessionals((prosData ?? []) as Professional[])
     setOwnBudgets((own ?? []) as typeof ownBudgets)
     const map: Record<string, string> = {}
@@ -234,8 +254,11 @@ export function Budgets() {
     setBudgets(prev => prev.filter(b => b.id !== id))
   }
 
+  // Referencia del presupuesto: código de gremio (del tablero del lead) + teléfono
+  const refOf = (b: Budget) => budgetReference(b.lead_id ? leadVerticalById[b.lead_id] : null, b.client_phone)
+
   function exportPdf(b: Budget) {
-    exportBudgetPdf(b, buildIssuer(b, professionals, organization?.name))
+    exportBudgetPdf(b, buildIssuer(b, professionals, organization?.name), { reference: refOf(b) })
   }
 
   function proName(id?: string | null): string { return professionals.find(p => p.id === id)?.name ?? 'Profesional' }
@@ -309,7 +332,7 @@ export function Budgets() {
   async function sendWhatsApp(b: Budget) {
     const win = window.open('', '_blank')  // abrir ya para evitar bloqueo de popup
     toast.info('Preparando PDF…')
-    const url = await uploadBudgetPdf(b, buildIssuer(b, professionals, organization?.name))
+    const url = await uploadBudgetPdf(b, buildIssuer(b, professionals, organization?.name), refOf(b))
     const wa = buildWhatsAppUrl(b, url)
     if (win) win.location.href = wa
     else window.open(wa, '_blank')
@@ -401,6 +424,7 @@ export function Budgets() {
                           })()}
                         </div>
                       )}
+                      {refOf(b) && <p className="text-[11px] text-gray-400 mt-0.5">Ref: {refOf(b)}</p>}
                     </td>
                     <td className="px-3 py-3 text-gray-500 max-w-[220px] truncate">{b.concept || '—'}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{creatorLabel(b)}</td>
