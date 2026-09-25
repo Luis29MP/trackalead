@@ -82,6 +82,17 @@ function buildDoc(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: 
   doc.line(marginX, y, pageW - marginX, y)
   y += 8
 
+  // ── Sello ORIENTATIVO (solo si el presupuesto es orientativo) ─────────────────
+  const isOrientativo = budget.type === 'orientativo'
+  if (isOrientativo) {
+    const barH = 8
+    doc.setFillColor(254, 243, 199)   // amber-100
+    doc.roundedRect(marginX, y, pageW - marginX * 2, barH, 1.5, 1.5, 'F')
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(180, 83, 9)  // amber-700
+    doc.text('PRESUPUESTO ORIENTATIVO · SIN VALOR CONTRACTUAL', pageW / 2, y + 5.4, { align: 'center' })
+    y += barH + 6
+  }
+
   // ── Datos del cliente (en caja) ──────────────────────────────────────────────
   const boxPad = 3.5
   const clientRows = [
@@ -179,8 +190,19 @@ function buildDoc(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: 
     afterY += 6
   }
 
-  // ── Aceptación del presupuesto ─────────────────────────────────────────────────
+  // ── Aviso legal (condicionado guardado en el presupuesto, p. ej. orientativo) ──
   const pageHt = doc.internal.pageSize.getHeight()
+  if (budget.legal_text) {
+    if (afterY > pageHt - 55) { doc.addPage(); afterY = 20 }
+    doc.setDrawColor(230, 230, 230); doc.setLineWidth(0.3); doc.line(marginX, afterY, pageW - marginX, afterY); afterY += 5
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...GRAY)
+    doc.text('AVISO LEGAL', marginX, afterY); afterY += 4
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(120, 120, 120)
+    const legalLines = doc.splitTextToSize(budget.legal_text, pageW - marginX * 2)
+    doc.text(legalLines, marginX, afterY); afterY += legalLines.length * 3.6 + 6
+  }
+
+  // ── Aceptación del presupuesto ─────────────────────────────────────────────────
   if (afterY > pageHt - 40) { doc.addPage(); afterY = 20 }
   doc.setDrawColor(220, 220, 220); doc.setLineWidth(0.3); doc.line(marginX, afterY, pageW - marginX, afterY); afterY += 6
   doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...DARK)

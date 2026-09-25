@@ -85,6 +85,17 @@ export function emptyDraft(): Draft {
   }
 }
 
+// Quita de las notas cualquier frase que haga referencia a otras opciones/alternativas
+// (cada opción se entrega como presupuesto independiente).
+function stripOptionRefs(text: string): string {
+  return (text || '')
+    .split(/(?<=[.\n])/)
+    .filter(s => !/opci[oó]n|alternativa/i.test(s))
+    .join('')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim()
+}
+
 function recalc(lines: BudgetLine[], vatPercent: number) {
   const subtotal = Math.round(lines.reduce((s, l) => s + (l.total || 0), 0) * 100) / 100
   const vat_amount = Math.round(subtotal * vatPercent) / 100
@@ -145,7 +156,7 @@ export function Budgets() {
 
   async function loadLeadsAndPros() {
     const [{ data: leadsData }, { data: prosData }, { data: own }, { data: mem }] = await Promise.all([
-      supabase.from('leads').select('id, name, phone, address, concept, zone, notes').eq('org_id', organization!.id).eq('is_archived', false).order('created_at', { ascending: false }),
+      supabase.from('leads').select('id, name, phone, address, concept, zone, notes, assigned_to').eq('org_id', organization!.id).eq('is_archived', false).order('created_at', { ascending: false }),
       supabase.from('professionals').select('*').eq('org_id', organization!.id).order('name'),
       supabase.from('pro_own_budgets').select('id, professional_id, client_name, concept, lines, subtotal, vat_percent, total, notes, created_at').eq('org_id', organization!.id).order('created_at', { ascending: false }),
       supabase.from('org_members').select('user_id, profile:profiles(full_name)').eq('org_id', organization!.id),
@@ -594,6 +605,7 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
       client_address: l.address ?? '',
       concept: l.concept ?? '',
       work_notes: l.notes ?? '',
+      professional_id: l.assigned_to ?? d.professional_id,   // profesional del lead preseleccionado
     }))
     setStep(2)
   }
@@ -686,6 +698,7 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
   // Guarda N presupuestos (uno por OPCIÓN/alternativa) con un group_id común
   async function saveOptions(options: { label: string; lines: BudgetLine[] }[], notes: string) {
     const now = new Date().toISOString()
+    const cleanNotes = stripOptionRefs(notes)  // sin referencias a otras opciones
     const groupId = crypto.randomUUID()
     const created: Budget[] = []
     for (let i = 0; i < options.length; i++) {
@@ -708,7 +721,7 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
         total: t.total,
         margin_percent: draft.margin_percent,
         validity_days: draft.validity_days,
-        notes: notes || null,
+        notes: cleanNotes || null,
         status: 'draft',
         ai_generated: true,
         ...typeFields(),

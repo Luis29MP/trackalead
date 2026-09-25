@@ -584,6 +584,7 @@ export function LeadDetail() {
       client_address: lead.address || lead.zone || '',
       concept: lead.concept ?? '',
       work_notes: workNotes,
+      professional_id: lead.assigned_to ?? null,   // profesional del lead preseleccionado
       images,
     })
   }
