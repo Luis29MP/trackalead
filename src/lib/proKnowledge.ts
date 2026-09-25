@@ -42,13 +42,35 @@ export async function fetchBudgetLibraryText(orgId: string): Promise<string> {
   return out.trim()
 }
 
-// Conocimiento combinado para generar: biblioteca de la org + conocimiento del profesional.
+// Tarifas de TODOS los profesionales activos de la org, como texto para el prompt.
+// Así la IA usa vuestros precios reales aunque no se seleccione un profesional.
+export async function fetchProfessionalsRatesText(orgId: string): Promise<string> {
+  const { data } = await supabase
+    .from('professionals')
+    .select('name, specialty, rates')
+    .eq('org_id', orgId)
+    .eq('is_active', true)
+  if (!data?.length) return ''
+  const blocks: string[] = []
+  for (const p of data as { name: string; specialty: string | null; rates: { work_type: string; rec_price: number; min_price: number; unit: string }[] | null }[]) {
+    const rates = p.rates ?? []
+    if (!rates.length) continue
+    blocks.push(`${p.name}${p.specialty ? ` (${p.specialty})` : ''}: ` +
+      rates.map(r => `${r.work_type} → ${r.rec_price}€/${r.unit} (mín ${r.min_price}€)`).join('; '))
+  }
+  if (!blocks.length) return ''
+  return `TARIFAS REALES DE LOS PROFESIONALES (precio de referencia PRIORITARIO: cuando el trabajo coincida con una tarifa, usa ese precio unitario, no inventes uno más bajo):\n${blocks.join('\n')}`
+}
+
+// Conocimiento combinado para generar: tarifas + biblioteca de la org + conocimiento del profesional.
 export async function fetchGenerationKnowledge(orgId: string, professionalId?: string | null): Promise<string> {
-  const [lib, pro] = await Promise.all([
+  const [rates, lib, pro] = await Promise.all([
+    fetchProfessionalsRatesText(orgId),
     fetchBudgetLibraryText(orgId),
     professionalId ? fetchProKnowledgeText(professionalId) : Promise.resolve(''),
   ])
   return [
+    rates,
     lib ? `BIBLIOTECA DE PRESUPUESTOS REALES DE LA EMPRESA (úsala como referencia principal de formato, partidas y precios):${lib}` : '',
     pro,
   ].filter(Boolean).join('\n\n')

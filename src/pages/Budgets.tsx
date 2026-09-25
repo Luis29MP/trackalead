@@ -713,7 +713,7 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
         client_name: draft.client_name,
         client_phone: draft.client_phone || null,
         client_address: draft.client_address || null,
-        concept: `Propuesta de presupuesto ${i + 1}`,
+        concept: draft.concept?.trim() ? `${draft.concept.trim()} · Opción ${i + 1}` : `Propuesta de presupuesto ${i + 1}`,
         lines: opt.lines,
         subtotal: t.subtotal,
         vat_percent: draft.vat_percent,
