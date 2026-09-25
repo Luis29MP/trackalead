@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBoardColumns } from '@/hooks/useBoards'
+import { MicButton } from '@/components/MicButton'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -789,13 +790,16 @@ export function KanbanBoard() {
           <div className="space-y-4">
             {/* Smart paste */}
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
-              <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5">
-                <ClipboardPaste className="h-3.5 w-3.5" />
-                Pegar mensaje del cliente
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5">
+                  <ClipboardPaste className="h-3.5 w-3.5" />
+                  Pegar o dictar mensaje del cliente
+                </p>
+                <MicButton onText={t => setPasteText(p => (p ? `${p} ${t}` : t))} title="Dictar el mensaje" className="h-7 w-7" />
+              </div>
               <Textarea
                 rows={3}
-                placeholder="Pega aquí un WhatsApp, email… y pulsa Extraer"
+                placeholder="Pega aquí un WhatsApp, email… o dicta con el micro, y pulsa Extraer"
                 value={pasteText}
                 onChange={e => setPasteText(e.target.value)}
                 className="text-xs resize-none"

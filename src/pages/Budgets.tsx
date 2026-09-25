@@ -12,6 +12,7 @@ import { fetchGenerationKnowledge } from '@/lib/proKnowledge'
 import { exportBudgetPdf, viewBudgetPdf, exportBudgetComparison, toClientBudget, type PdfOrgInfo } from '@/lib/budgetPdf'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
 import { ImportProBudget } from '@/components/ImportProBudget'
+import { MicButton } from '@/components/MicButton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -74,6 +75,7 @@ export interface Draft {
   status: BudgetStatus
   images: ImgItem[]
   type?: 'orientativo' | 'cerrado'
+  parent_budget_id?: string | null   // si viene de convertir un orientativo
 }
 
 export function emptyDraft(): Draft {
@@ -81,7 +83,7 @@ export function emptyDraft(): Draft {
     lead_id: null, client_name: '', client_phone: '', client_address: '', concept: '',
     work_notes: '', professional_id: null, margin_percent: 20, ai_instructions: '',
     lines: [], vat_percent: 21, validity_days: 30, notes: '', status: 'draft', images: [],
-    type: 'cerrado',
+    type: 'cerrado', parent_budget_id: null,
   }
 }
 
@@ -197,6 +199,31 @@ export function Budgets() {
       status: b.status ?? 'draft',
       images: [],
       type: b.type ?? 'cerrado',
+    })
+    setWizardOpen(true)
+  }
+
+  // Convertir un orientativo en cerrado: abre el asistente precargado (sin id → nuevo
+  // presupuesto cerrado enlazado al orientativo) para reeditar líneas y notas.
+  function openPromote(b: Budget) {
+    setEditDraft({
+      lead_id: b.lead_id,
+      client_name: b.client_name ?? '',
+      client_phone: b.client_phone ?? '',
+      client_address: b.client_address ?? '',
+      concept: (b.concept ?? '').replace(/\s*·\s*Opci[oó]n \d+\s*$/i, ''),
+      work_notes: '',
+      professional_id: b.professional_id ?? null,
+      margin_percent: b.margin_percent ?? 20,
+      ai_instructions: '',
+      lines: b.lines ?? [],
+      vat_percent: b.vat_percent ?? 21,
+      validity_days: b.validity_days ?? 30,
+      notes: b.notes ?? '',
+      status: 'draft',
+      images: [],
+      type: 'cerrado',
+      parent_budget_id: b.id,
     })
     setWizardOpen(true)
   }
@@ -379,9 +406,14 @@ export function Budgets() {
                     <td className="px-3 py-3 text-xs text-gray-600">{creatorLabel(b)}</td>
                     <td className="px-3 py-3 text-right font-semibold text-gray-900">{formatCurrency(b.total)}</td>
                     <td className="px-3 py-3">
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${STATUS_META[b.status]?.color ?? STATUS_META.draft.color}`}>
-                        {STATUS_META[b.status]?.label ?? b.status}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1">
+                        {b.type === 'orientativo' && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Orientativo</span>
+                        )}
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${STATUS_META[b.status]?.color ?? STATUS_META.draft.color}`}>
+                          {STATUS_META[b.status]?.label ?? b.status}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-3 py-3 text-xs text-gray-400">{formatDate(b.created_at)}</td>
                     <td className="px-3 py-3">
@@ -396,6 +428,11 @@ export function Budgets() {
                         )}
                         {b.status !== 'rejected' && (
                           <button onClick={() => rejectBudget(b)} className="p-1.5 rounded hover:bg-red-50 text-red-400" title="Rechazar / caducar → Rechazados"><X className="h-4 w-4" /></button>
+                        )}
+                        {b.type === 'orientativo' && (
+                          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs text-amber-700 border-amber-200 hover:bg-amber-50" onClick={() => openPromote(b)} title="Convertir en presupuesto cerrado (reeditando)">
+                            <ArrowRight className="h-3.5 w-3.5" />A cerrado
+                          </Button>
                         )}
                         <button onClick={() => sendWhatsApp(b)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-500" title="Enviar por WhatsApp"><MessageCircle className="h-4 w-4" /></button>
                         <button onClick={() => openEdit(b)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500" title="Ver / Editar"><Pencil className="h-3.5 w-3.5" /></button>
@@ -825,6 +862,7 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
       margin_percent: draft.margin_percent,
       validity_days: draft.validity_days,
       notes: draft.notes || null,
+      parent_budget_id: draft.parent_budget_id ?? null,
       status: draft.status,
       ai_generated: true,
       ...typeFields(),
@@ -1045,7 +1083,10 @@ export function BudgetWizard({ initial, leads, professionals, orgId, userId, org
             </div>
 
             <div className="space-y-1.5">
-              <Label>Notas adicionales para la IA (opcional)</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label>Notas adicionales para la IA (opcional)</Label>
+                <MicButton onText={t => setDraft(d => ({ ...d, ai_instructions: d.ai_instructions ? `${d.ai_instructions} ${t}` : t }))} title="Dictar notas" className="h-7 w-7" />
+              </div>
               <Textarea rows={3} placeholder="Ej: incluir retirada de escombros, material de gama media…" value={draft.ai_instructions} onChange={e => setDraft(d => ({ ...d, ai_instructions: e.target.value }))} />
             </div>
 
