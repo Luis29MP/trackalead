@@ -143,7 +143,8 @@ function buildDoc(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: 
   // ── Resumen: subtotales por sección + Subtotal + IVA + TOTAL ───────────────────
   const rowsX = marginX, valuesX = pageW - marginX
   const sumRow = (label: string, value: string, o: { bold?: boolean; color?: [number, number, number]; rule?: boolean } = {}) => {
-    if (o.rule) { doc.setDrawColor(...PRIMARY); doc.setLineWidth(0.4); doc.line(rowsX, afterY - 2, valuesX, afterY - 2) }
+    // Línea separadora POR ENCIMA del texto (con hueco), no cruzándolo
+    if (o.rule) { afterY += 3.5; doc.setDrawColor(...PRIMARY); doc.setLineWidth(0.4); doc.line(rowsX, afterY - 5, valuesX, afterY - 5) }
     doc.setFont('helvetica', o.bold ? 'bold' : 'normal')
     doc.setFontSize(o.bold ? 11.5 : 9.5)
     const c = o.color ?? ([80, 80, 80] as [number, number, number])
