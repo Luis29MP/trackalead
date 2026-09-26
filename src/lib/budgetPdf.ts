@@ -101,7 +101,7 @@ function buildDoc(budget: Budget, org: PdfOrgInfo = {}, opts: { hideUnitPrice?: 
     budget.client_phone ? ['Teléfono:', budget.client_phone] : null,
     opts.reference ? ['Referencia:', opts.reference] : null,
     budget.client_address ? ['Dirección:', budget.client_address] : null,
-    budget.concept ? ['Trabajo:', budget.concept] : null,
+    budget.concept ? ['Trabajo:', budget.concept.replace(/\s*·\s*Opci[oó]n \d+\s*$/i, '')] : null,
   ].filter(Boolean) as [string, string][]
   const boxH = 7 + clientRows.length * 4.8 + boxPad
   doc.setFillColor(245, 247, 250)
