@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { getTextScale, setTextScale, type TextScale } from '@/lib/textScale'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -24,7 +24,7 @@ import { AiIntegrations } from '@/components/settings/AiIntegrations'
 import { Integrations } from '@/components/settings/Integrations'
 import { BudgetLibrary } from '@/pages/BudgetLibrary'
 import { EmailAccounts } from '@/pages/EmailAccounts'
-import { BookOpen, Mail } from 'lucide-react'
+import { BookOpen, Mail, ArrowLeft } from 'lucide-react'
 import type { OrgMember, Profile, UserRole } from '@/types'
 
 const ROLE_LABEL: Record<string, string> = {
@@ -188,25 +188,51 @@ export function Settings() {
   }
 
   const isOwner = members.find((m) => m.user_id === user?.id)?.role === 'owner'
+  const [section, setSection] = useState('')   // '' = hub de tarjetas
+
+  const SECTIONS = [
+    { key: 'org', label: 'Organizaciones', icon: Building2, desc: 'Tus organizaciones y colaboradores' },
+    { key: 'subscription', label: 'Suscripción', icon: CreditCard, desc: 'Plan y facturación' },
+    { key: 'profile', label: 'Perfil', icon: User, desc: 'Tus datos y preferencias' },
+    { key: 'security', label: 'Seguridad', icon: Lock, desc: 'Contraseña y acceso' },
+    { key: 'ai', label: 'Integraciones IA', icon: Sparkles, desc: 'Claves de IA para generar' },
+    { key: 'biblioteca', label: 'Biblioteca', icon: BookOpen, desc: 'Presupuestos que alimentan la IA' },
+    { key: 'correo', label: 'Correo', icon: Mail, desc: 'Correo saliente por web' },
+    { key: 'integrations', label: 'Integraciones', icon: Plug, desc: 'WhatsApp, Calendar y más' },
+  ] as const
+  const activeSection = SECTIONS.find(s => s.key === section)
 
   return (
     <div className="max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Configuración</h1>
-        <p className="text-gray-500 text-sm mt-1">Cuenta, organización y seguridad</p>
+      <div className="flex items-center gap-3">
+        {section && (
+          <button onClick={() => setSection('')} className="p-1.5 -ml-1.5 rounded-lg hover:bg-gray-100 text-gray-500" title="Volver">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+        )}
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">{activeSection ? activeSection.label : 'Configuración'}</h1>
+          <p className="text-gray-500 text-sm mt-1">{activeSection ? activeSection.desc : 'Cuenta, organización y seguridad'}</p>
+        </div>
       </div>
 
-      <Tabs defaultValue="org">
-        <TabsList className="mb-6">
-          <TabsTrigger value="org"><Building2 className="h-3.5 w-3.5 mr-1.5" />Organizaciones</TabsTrigger>
-          <TabsTrigger value="subscription"><CreditCard className="h-3.5 w-3.5 mr-1.5" />Suscripción</TabsTrigger>
-          <TabsTrigger value="profile"><User className="h-3.5 w-3.5 mr-1.5" />Perfil</TabsTrigger>
-          <TabsTrigger value="security"><Lock className="h-3.5 w-3.5 mr-1.5" />Seguridad</TabsTrigger>
-          <TabsTrigger value="ai"><Sparkles className="h-3.5 w-3.5 mr-1.5" />Integraciones IA</TabsTrigger>
-          <TabsTrigger value="biblioteca"><BookOpen className="h-3.5 w-3.5 mr-1.5" />Biblioteca</TabsTrigger>
-          <TabsTrigger value="correo"><Mail className="h-3.5 w-3.5 mr-1.5" />Correo</TabsTrigger>
-          <TabsTrigger value="integrations"><Plug className="h-3.5 w-3.5 mr-1.5" />Integraciones</TabsTrigger>
-        </TabsList>
+      {/* Hub: rejilla de tarjetas cuando no hay sección abierta */}
+      {!section && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {SECTIONS.map(s => (
+            <button key={s.key} onClick={() => setSection(s.key)}
+              className="text-left bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md hover:border-primary-300 transition-all flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-primary-50 flex items-center justify-center shrink-0"><s.icon className="h-5 w-5 text-primary-600" /></div>
+              <div className="min-w-0">
+                <p className="font-semibold text-gray-900 text-sm">{s.label}</p>
+                <p className="text-xs text-gray-400 leading-snug mt-0.5">{s.desc}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <Tabs value={section} onValueChange={setSection}>
 
         {/* ── ORGANIZACIONES ───────────────────────────────────────────────── */}
         <TabsContent value="org" className="space-y-5">
