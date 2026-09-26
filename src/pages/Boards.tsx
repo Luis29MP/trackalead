@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Globe, Layers, Check, Trash2, Users, Sparkles, Download, MapPin, Building2, ArrowLeft, ChevronRight } from 'lucide-react'
+import { Plus, Globe, Layers, Check, Trash2, Users, Sparkles, Download, MapPin, Building2, ArrowLeft, ChevronRight, Settings2 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatDate } from '@/lib/utils'
 import { DeleteBoardDialog } from '@/components/DeleteBoardDialog'
+import { BoardSettings } from '@/components/BoardSettings'
 import { ImportTrello } from '@/components/ImportTrello'
 import type { Board } from '@/types'
 
@@ -124,6 +125,7 @@ export function Boards() {
   }
 
   const [deleteTarget, setDeleteTarget] = useState<Board | null>(null)
+  const [settingsBoard, setSettingsBoard] = useState<Board | null>(null)
 
   // Importar de Trello: elegir tablero destino (existente o nuevo) y luego importar
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -312,7 +314,7 @@ export function Boards() {
       ) : territories.length === 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {boards.map((board) => (
-            <BoardCard key={board.id} board={board} onClick={() => navigate(`/boards/${board.id}`)} onDelete={() => setDeleteTarget(board)} />
+            <BoardCard key={board.id} board={board} onClick={() => navigate(`/boards/${board.id}`)} onDelete={() => setDeleteTarget(board)} onSettings={() => setSettingsBoard(board)} />
           ))}
         </div>
       ) : openGroupId === null ? (
@@ -378,7 +380,7 @@ export function Boards() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {list.map((board) => (
-                    <BoardCard key={board.id} board={board} onClick={() => navigate(`/boards/${board.id}`)} onDelete={() => setDeleteTarget(board)} />
+                    <BoardCard key={board.id} board={board} onClick={() => navigate(`/boards/${board.id}`)} onDelete={() => setDeleteTarget(board)} onSettings={() => setSettingsBoard(board)} />
                   ))}
                 </div>
               )}
@@ -394,6 +396,15 @@ export function Boards() {
         onOpenChange={v => { if (!v) setDeleteTarget(null) }}
         onDeleted={() => { setDeleteTarget(null); refetch() }}
       />
+
+      {settingsBoard && (
+        <BoardSettings
+          board={settingsBoard}
+          open={!!settingsBoard}
+          onOpenChange={v => { if (!v) setSettingsBoard(null) }}
+          onSaved={() => { refetch() }}
+        />
+      )}
 
       {/* Nuevo grupo (zona / empresa) */}
       <Dialog open={groupOpen} onOpenChange={setGroupOpen}>
@@ -553,7 +564,7 @@ function GroupCard({ name, kind, boardCount, leadCount, onClick }: { name: strin
   )
 }
 
-function BoardCard({ board, onClick, onDelete }: { board: Board; onClick: () => void; onDelete: () => void }) {
+function BoardCard({ board, onClick, onDelete, onSettings }: { board: Board; onClick: () => void; onDelete: () => void; onSettings: () => void }) {
   const total = board.lead_count ?? 0
   const nuevos = board.new_count ?? 0
   return (
@@ -566,6 +577,13 @@ function BoardCard({ board, onClick, onDelete }: { board: Board; onClick: () => 
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-base leading-tight">{board.name}</CardTitle>
           <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={(e) => { e.stopPropagation(); onSettings() }}
+              className="p-1 rounded text-gray-300 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+              title="Opciones del tablero"
+            >
+              <Settings2 className="h-4 w-4" />
+            </button>
             <button
               onClick={(e) => { e.stopPropagation(); onDelete() }}
               className="p-1 rounded text-gray-300 hover:text-red-600 hover:bg-red-50 transition-colors"

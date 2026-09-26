@@ -42,7 +42,7 @@ const EMPTY: FormState = {
   smtp_port: 465, smtp_secure: true, smtp_user: '', smtp_pass: '',
 }
 
-export function EmailAccounts() {
+export function EmailAccounts({ boardId }: { boardId?: string } = {}) {
   const { organization } = useAuth()
   const { boards } = useBoards()
   const { territories } = useTerritories()
@@ -58,16 +58,18 @@ export function EmailAccounts() {
 
   async function load() {
     setLoading(true)
-    const { data } = await supabase.from('email_accounts')
+    let q = supabase.from('email_accounts')
       .select('id, board_id, label, from_email, from_name, smtp_host, smtp_port, smtp_secure, smtp_user, is_active')
-      .eq('org_id', organization!.id).order('created_at', { ascending: true })
+      .eq('org_id', organization!.id)
+    if (boardId) q = q.eq('board_id', boardId)
+    const { data } = await q.order('created_at', { ascending: true })
     setAccounts((data ?? []) as EmailAccount[])
     setLoading(false)
   }
 
   const boardName = (id: string | null) => { const b = boards.find(x => x.id === id); return b ? boardLabel(b, territories) : null }
 
-  function openNew() { setForm(EMPTY); setPickTerritory(''); setOpen(true) }
+  function openNew() { setForm({ ...EMPTY, board_id: boardId ?? '' }); setPickTerritory(boardId ? (boards.find(b => b.id === boardId)?.territory_id ?? '') : ''); setOpen(true) }
   function openEdit(a: EmailAccount) {
     setForm({
       id: a.id, board_id: a.board_id ?? '', label: a.label ?? '', from_email: a.from_email,
@@ -93,7 +95,7 @@ export function EmailAccounts() {
           action: 'save_account',
           account: {
             id: form.id, org_id: organization!.id,
-            board_id: form.board_id || null, label: form.label || null,
+            board_id: boardId || form.board_id || null, label: form.label || null,
             from_email: form.from_email.trim(), from_name: form.from_name || null,
             smtp_host: form.smtp_host.trim(), smtp_port: Number(form.smtp_port) || 465,
             smtp_secure: form.smtp_secure, smtp_user: (form.smtp_user || form.from_email).trim(),
@@ -172,28 +174,30 @@ export function EmailAccounts() {
         <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{form.id ? 'Editar cuenta de correo' : 'Nueva cuenta de correo'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Provincia / territorio</Label>
-                <Select value={pickTerritory || 'none'} onValueChange={v => { setPickTerritory(v === 'none' ? '' : v); setForm(f => ({ ...f, board_id: '' })) }}>
-                  <SelectTrigger><SelectValue placeholder="Sin territorio" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sin territorio</SelectItem>
-                    {territories.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+            {!boardId && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Provincia / territorio</Label>
+                  <Select value={pickTerritory || 'none'} onValueChange={v => { setPickTerritory(v === 'none' ? '' : v); setForm(f => ({ ...f, board_id: '' })) }}>
+                    <SelectTrigger><SelectValue placeholder="Sin territorio" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sin territorio</SelectItem>
+                      {territories.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Subtablero (web)</Label>
+                  <Select value={form.board_id || 'none'} onValueChange={v => setForm(f => ({ ...f, board_id: v === 'none' ? '' : v }))} disabled={!pickTerritory}>
+                    <SelectTrigger><SelectValue placeholder={pickTerritory ? 'Elige tablero' : 'Elige provincia primero'} /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sin tablero (general)</SelectItem>
+                      {boardsForTerritory.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>Subtablero (web)</Label>
-                <Select value={form.board_id || 'none'} onValueChange={v => setForm(f => ({ ...f, board_id: v === 'none' ? '' : v }))} disabled={!pickTerritory}>
-                  <SelectTrigger><SelectValue placeholder={pickTerritory ? 'Elige tablero' : 'Elige provincia primero'} /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sin tablero (general)</SelectItem>
-                    {boardsForTerritory.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Correo (from) *</Label>
