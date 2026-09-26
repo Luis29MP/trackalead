@@ -3,6 +3,16 @@ import { supabase } from '@/lib/supabase'
 import type { Board, BoardColumn, BudgetState, Territory } from '@/types'
 import { useAuth } from '@/context/AuthContext'
 
+// Etiqueta de tablero con su territorio delante ("León - Reformas"), para
+// distinguir tableros con el mismo nombre en distintas zonas.
+export function boardLabel(
+  board: { name: string; territory_id?: string | null },
+  territories: Territory[],
+): string {
+  const t = territories.find(x => x.id === board.territory_id)
+  return t ? `${t.name} - ${board.name}` : board.name
+}
+
 // Territorios (zona/provincia) de la organización
 export function useTerritories() {
   const [territories, setTerritories] = useState<Territory[]>([])

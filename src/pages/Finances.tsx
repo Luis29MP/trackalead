@@ -4,7 +4,7 @@ import { DollarSign, CheckCircle, Clock, TrendingUp, Filter, ExternalLink, Check
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { useBoards, useTerritories } from '@/hooks/useBoards'
+import { useBoards, useTerritories, boardLabel } from '@/hooks/useBoards'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -251,7 +251,7 @@ export function Finances() {
           <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos los tableros</SelectItem>
-            {boardsForFilter.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            {boardsForFilter.map((b) => <SelectItem key={b.id} value={b.id}>{boardLabel(b, territories)}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={filterState} onValueChange={(v) => setFilterState(v as typeof filterState)}>

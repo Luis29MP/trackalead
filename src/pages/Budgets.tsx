@@ -9,7 +9,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { generateBudget, generateBudgetSplit, splitBudgetOptions, type AiImage } from '@/lib/ai'
 import { fetchGenerationKnowledge } from '@/lib/proKnowledge'
-import { useBoards, useTerritories } from '@/hooks/useBoards'
+import { useBoards, useTerritories, boardLabel } from '@/hooks/useBoards'
 import { exportBudgetPdf, viewBudgetPdf, exportBudgetComparison, toClientBudget, type PdfOrgInfo } from '@/lib/budgetPdf'
 import { uploadBudgetPdf, buildWhatsAppUrl } from '@/lib/budgetShare'
 import { ImportProBudget } from '@/components/ImportProBudget'
@@ -427,7 +427,7 @@ export function Budgets() {
             <SelectTrigger className="w-48"><SelectValue placeholder="Tablero" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos los tableros</SelectItem>
-              {boardsForFilter.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              {boardsForFilter.map(b => <SelectItem key={b.id} value={b.id}>{boardLabel(b, territories)}</SelectItem>)}
             </SelectContent>
           </Select>
           {filtersActive && (

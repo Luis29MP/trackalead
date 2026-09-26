@@ -4,7 +4,7 @@ import { Link, Copy, Check, Crown, Shield, User, Users, Trash2, Pencil, X, Chevr
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { useBoards } from '@/hooks/useBoards'
+import { useBoards, useTerritories, boardLabel } from '@/hooks/useBoards'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -43,6 +43,7 @@ const EMPTY_INVITE: InviteForm = {
 export function Team() {
   const { organization, user } = useAuth()
   const { boards } = useBoards()
+  const { territories } = useTerritories()
   const navigate = useNavigate()
   const [members, setMembers]           = useState<MemberWithProfile[]>([])
   const [pending, setPending]           = useState<Invitation[]>([])
@@ -284,7 +285,7 @@ export function Team() {
                       <label key={b.id} className="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" checked={form.boardIds.includes(b.id)} onChange={() => toggleBoard(b.id)}
                           className="rounded border-gray-300 text-primary-600" />
-                        <span className="text-sm text-gray-700">{b.name}</span>
+                        <span className="text-sm text-gray-700">{boardLabel(b, territories)}</span>
                         <span className="w-2 h-2 rounded-full" style={{ backgroundColor: b.color }} />
                       </label>
                     ))}

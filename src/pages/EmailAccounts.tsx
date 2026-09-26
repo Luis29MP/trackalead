@@ -3,7 +3,7 @@ import { Mail, Plus, Trash2, Pencil, Send, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { useBoards } from '@/hooks/useBoards'
+import { useBoards, useTerritories, boardLabel } from '@/hooks/useBoards'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -45,6 +45,7 @@ const EMPTY: FormState = {
 export function EmailAccounts() {
   const { organization } = useAuth()
   const { boards } = useBoards()
+  const { territories } = useTerritories()
   const [accounts, setAccounts] = useState<EmailAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
@@ -63,7 +64,7 @@ export function EmailAccounts() {
     setLoading(false)
   }
 
-  const boardName = (id: string | null) => boards.find(b => b.id === id)?.name ?? null
+  const boardName = (id: string | null) => { const b = boards.find(x => x.id === id); return b ? boardLabel(b, territories) : null }
 
   function openNew() { setForm(EMPTY); setOpen(true) }
   function openEdit(a: EmailAccount) {
@@ -170,7 +171,7 @@ export function EmailAccounts() {
                 <SelectTrigger><SelectValue placeholder="Sin tablero" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Sin tablero (general)</SelectItem>
-                  {boards.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  {boards.map(b => <SelectItem key={b.id} value={b.id}>{boardLabel(b, territories)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
