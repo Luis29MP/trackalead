@@ -32,83 +32,6 @@ import { DeleteBoardDialog } from '@/components/DeleteBoardDialog'
 import { BUDGET_STATE_META } from '@/lib/budgetState'
 import type { Board, Lead, BoardColumn } from '@/types'
 
-// ── Smart paste ───────────────────────────────────────────────────────────────────
-// Normaliza (sin tildes, minúsculas) para comparar etiquetas
-function normKey(s: string): string {
-  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
-}
-
-// Asigna una etiqueta de campo a una clave canónica del formulario
-function labelToField(label: string): 'name' | 'company' | 'concept' | 'zone' | 'phone' | 'email' | 'notes' | 'when' | '' {
-  const t = normKey(label)
-  if (/^(nombre|cliente|contacto|solicitante|nombre y apellidos)$/.test(t) || /\bnombre\b/.test(t)) return 'name'
-  if (/telefono|tlf|^tel$|movil|celular|whatsapp|numero de contacto|contacto telefonico/.test(t)) return 'phone'
-  if (/email|correo|e-mail|mail/.test(t)) return 'email'
-  if (/zona|ciudad|localidad|poblacion|municipio|direccion|provincia|ubicacion/.test(t)) return 'zone'
-  if (/empresa|compania|negocio/.test(t)) return 'company'
-  if (/concepto|servicio|tipo de trabajo|selecciona|asunto|categoria|gremio/.test(t)) return 'concept'
-  if (/mensaje|detalle|descripcion|comentario|observacion|solicitud|consulta|necesito|trabajo a realizar/.test(t)) return 'notes'
-  if (/cuando|plazo|fecha|urgencia|empezar|inicio|presupuesto/.test(t)) return 'when'
-  return ''
-}
-
-function parsePastedText(text: string): Partial<NewLeadForm> {
-  const r: Partial<NewLeadForm> = {}
-  const fields: Partial<Record<'name'|'company'|'concept'|'zone'|'phone'|'email'|'notes'|'when', string>> = {}
-  const extraNotes: string[] = []
-
-  // Parseo por campos: tolera "*Etiqueta:* valor", "Etiqueta: valor", viñetas y
-  // continuación multilínea (líneas sueltas se añaden al último campo abierto).
-  let lastKey: 'name'|'company'|'concept'|'zone'|'phone'|'email'|'notes'|'when'|null = null
-  for (const raw of text.replace(/\r/g, '').split('\n')) {
-    // Quita negritas markdown y CUALQUIER emoji/símbolo/viñeta inicial (los resúmenes
-    // de la app usan 🔖 📞 🧑‍💼 … antes de la etiqueta), para poder detectar el campo.
-    const line = raw.replace(/[*_`]+/g, '').replace(/^[^\p{L}\p{N}(¿¡]+/u, '').trim()
-    if (!line) { lastKey = null; continue }
-    const m = line.match(/^([A-Za-zÁÉÍÓÚáéíóúÑñ()¿?/¡!.\s]{2,45}?)\s*:\s*(.*)$/)
-    if (m) {
-      const key = labelToField(m[1])
-      const val = m[2].trim()
-      if (key) {
-        fields[key] = fields[key] ? `${fields[key]} ${val}`.trim() : val
-        lastKey = key
-        continue
-      }
-      // etiqueta desconocida con ":" → va a notas conservando la etiqueta
-      extraNotes.push(line); lastKey = null; continue
-    }
-    // Línea de continuación del último campo (ej. "Más detalles" en varias líneas)
-    if (lastKey) fields[lastKey] = `${fields[lastKey] ?? ''} ${line}`.trim()
-    else extraNotes.push(line)
-  }
-
-  // Teléfono: del campo o, si no, buscando un móvil español en todo el texto
-  const phoneRaw = fields.phone || ''
-  const phoneMatch = (phoneRaw || text).match(/\+?\d[\d\s\-.]{7,}\d/)
-  if (phoneMatch) { const digits = phoneMatch[0].replace(/[\s\-.]/g, ''); if (digits.replace(/^\+/, '').length >= 9) r.phone = digits }
-
-  const emailMatch = (fields.email || text).match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)
-  if (emailMatch) r.email = emailMatch[0]
-
-  if (fields.name) r.name = fields.name
-  if (fields.company) r.company = fields.company
-  if (fields.zone) r.zone = fields.zone
-  if (fields.concept) r.concept = fields.concept
-
-  // Notas / trabajo a realizar: mensaje + cuándo + resto de líneas sin etiqueta
-  const notesParts = [fields.notes, fields.when ? `Cuándo: ${fields.when}` : '', ...extraNotes].filter(Boolean) as string[]
-  if (notesParts.length) r.notes = notesParts.join('\n').trim()
-
-  // Fallback: si no se detectó nombre por etiqueta, coge la 1ª línea "de persona"
-  if (!r.name) {
-    const cand = text.replace(/[*_`]+/g, '').split('\n').map(l => l.trim()).filter(Boolean)
-      .find(l => !/\d{6,}/.test(l) && !l.includes('@') && !l.includes(':') && l.length > 2 && l.length < 60)
-    if (cand) r.name = cand
-  }
-  // Si no hubo campo de mensaje y no hay concepto, usa todo el texto como notas
-  if (!r.notes && !fields.concept) r.notes = text.trim()
-  return r
-}
 
 // ── Lead Card ─────────────────────────────────────────────────────────────────────
 function LeadCard({ lead, columns, onClick, onMove }: {
@@ -596,12 +519,6 @@ export function KanbanBoard() {
     }
   }
 
-  function handleSmartPaste() {
-    const parsed = parsePastedText(pasteText)
-    setForm(f => ({ ...f, ...parsed }))
-    toast.success('Datos extraídos')
-  }
-
   // Adjuntos del lead: imagen → base64 redimensionado (para la IA); PDF → se guarda para subir.
   async function addLeadFiles(fileList: FileList | null) {
     const files = Array.from(fileList || [])
@@ -621,13 +538,13 @@ export function KanbanBoard() {
   }
   function removeLeadFile(idx: number) { setLeadFiles(prev => prev.filter((_, i) => i !== idx)) }
 
-  async function handleAISummary() {
+  // Lee el mensaje + adjuntos con IA, rellena los campos y crea el lead en un paso.
+  async function handleCreateWithAI() {
     const rawText = pasteText.trim() ? pasteText : form.notes
     if (!rawText.trim() && leadFiles.length === 0) { toast.error('Pega el mensaje del cliente o adjunta una foto/PDF'); return }
     setAiStatus('loading')
     try {
       const { analyzeLeadMessage } = await import('@/lib/ai')
-      // Imágenes para visión IA + texto extraído de los PDFs adjuntos
       const images = leadFiles.filter(f => f.kind === 'image').map(f => ({ mime: f.mime, data: f.data }))
       let extraText = ''
       const pdfs = leadFiles.filter(f => f.kind === 'pdf')
@@ -638,28 +555,26 @@ export function KanbanBoard() {
         } catch { /* si falla la extracción del PDF, seguimos con lo demás */ }
       }
       const a = await analyzeLeadMessage(`${rawText}${extraText}`.trim(), images)
-      // Completa el análisis con lo que ya haya en el formulario (p. ej. el teléfono
-      // introducido a mano no viene en el mensaje pegado): así el resumen lo incluye.
       const merged = {
         ...a,
-        name:  a.name  || form.name,
-        phone: a.phone || form.phone,
-        email: a.email || form.email,
-        zone:  a.zone  || form.zone,
-        concept: a.concept || form.concept,
+        name: a.name || form.name, phone: a.phone || form.phone, email: a.email || form.email,
+        zone: a.zone || form.zone, concept: a.concept || form.concept,
       }
-      // Rellenar campos (sin pisar lo ya escrito si la IA devuelve vacío)
-      setForm(f => ({
-        ...f,
-        name:    merged.name,
-        phone:   merged.phone,
-        email:   merged.email,
-        zone:    merged.zone,
+      const f: NewLeadForm = {
+        ...form,
+        name: merged.name, phone: merged.phone, email: merged.email, zone: merged.zone,
         concept: merged.concept,
-        notes:   formatLeadSummary(merged, board?.vertical_key ? VERTICAL_CODE[board.vertical_key] : undefined),
-      }))
+        notes: formatLeadSummary(merged, board?.vertical_key ? VERTICAL_CODE[board.vertical_key] : undefined),
+      }
+      setForm(f)   // reflejar en el formulario por si hay que revisar
+      if (!f.name.trim()) { setAiStatus('idle'); toast.error('No se detectó el nombre del cliente. Escríbelo y crea el lead.'); return }
+      // Geocodificar la zona para el mapa
+      let geo = latLng
+      if (!geo && f.zone.trim()) {
+        try { const { geocode } = await import('@/lib/geocode'); const r = await geocode(f.zone); if (r) geo = { lat: r.lat, lng: r.lng } } catch { /* sin geo */ }
+      }
       setAiStatus('done')
-      toast.success('Campos rellenados con IA')
+      await createLeadRow(f, geo)
     } catch (err) {
       setAiStatus('idle')
       toast.error(err instanceof Error ? err.message : 'Error al analizar el mensaje')
@@ -667,53 +582,37 @@ export function KanbanBoard() {
     }
   }
 
-  async function handleCreate() {
-    if (!form.name.trim() || !targetColumnId || !boardId) return
+  // Crea el lead con los valores dados (usado por el alta manual y por la de IA)
+  async function createLeadRow(f: NewLeadForm, geo?: { lat: number; lng: number } | null) {
+    if (!f.name.trim() || !targetColumnId || !boardId) { toast.error('Falta el nombre del cliente'); return }
     setSaving(true)
     try {
-      // El nuevo lead va ARRIBA de su columna: posición = (mínima actual) - 1
       const { data: topLead } = await supabase.from('leads')
         .select('position').eq('column_id', targetColumnId).eq('is_archived', false)
         .not('position', 'is', null).order('position', { ascending: true }).limit(1).maybeSingle()
       const newPosition = topLead?.position != null ? topLead.position - 1 : 0
 
+      const g = geo ?? latLng
       const { data: newLead } = await supabase.from('leads').insert({
-        board_id: boardId,
-        org_id: organization!.id,
-        column_id: targetColumnId,
-        title: form.name,
-        name: form.name,
-        company: form.company || null,
-        concept: form.concept || null,
-        zone: form.zone || null,
-        phone: form.phone || null,
-        email: form.email || null,
-        source: form.source,
-        notes: form.notes || null,
-        is_read: false,
-        position: newPosition,
-        lat: latLng?.lat ?? null,
-        lng: latLng?.lng ?? null,
+        board_id: boardId, org_id: organization!.id, column_id: targetColumnId,
+        title: f.name, name: f.name,
+        company: f.company || null, concept: f.concept || null, zone: f.zone || null,
+        phone: f.phone || null, email: f.email || null, source: f.source,
+        notes: f.notes || null, is_read: false, position: newPosition,
+        lat: g?.lat ?? null, lng: g?.lng ?? null,
       }).select().single()
 
-      // Registrar actividad de creación
       if (newLead) {
-        await supabase.from('lead_activity').insert({
-          lead_id: newLead.id,
-          user_id: user!.id,
-          action: 'created',
-          metadata: { source: form.source },
-        })
-
+        await supabase.from('lead_activity').insert({ lead_id: newLead.id, user_id: user!.id, action: 'created', metadata: { source: f.source } })
         // Guardar los adjuntos del cliente en la ficha del lead (fotos/PDF)
         if (leadFiles.length) {
-          for (const f of leadFiles) {
+          for (const lf of leadFiles) {
             try {
-              const path = `${organization!.id}/${newLead.id}/${Date.now()}-${f.name}`
-              const { data: up } = await supabase.storage.from('lead-files').upload(path, f.file, { upsert: true })
+              const path = `${organization!.id}/${newLead.id}/${Date.now()}-${lf.name}`
+              const { data: up } = await supabase.storage.from('lead-files').upload(path, lf.file, { upsert: true })
               if (up) {
                 const url = supabase.storage.from('lead-files').getPublicUrl(up.path).data.publicUrl
-                await supabase.from('lead_files').insert({ lead_id: newLead.id, name: f.name, url, type: f.file.type, size: f.file.size })
+                await supabase.from('lead_files').insert({ lead_id: newLead.id, name: lf.name, url, type: lf.file.type, size: lf.file.size })
               }
             } catch { /* si un adjunto falla, no bloquea la creación */ }
           }
@@ -730,6 +629,8 @@ export function KanbanBoard() {
       setSaving(false)
     }
   }
+
+  async function handleCreate() { await createLeadRow(form) }
 
   if (loading) {
     return (
@@ -898,14 +799,9 @@ export function KanbanBoard() {
                   </div>
                 )}
               </div>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={handleSmartPaste} disabled={!pasteText.trim()} className="flex-1">
-                  Extraer campos
-                </Button>
-                <Button size="sm" variant="outline" onClick={handleAISummary} disabled={aiStatus === 'loading'} className="flex-1">
-                  {aiStatus === 'loading' ? 'Analizando…' : aiStatus === 'done' ? '✅ Campos rellenados' : '✨ Resumir con IA'}
-                </Button>
-              </div>
+              <Button onClick={handleCreateWithAI} disabled={aiStatus === 'loading' || saving} className="w-full gap-1.5">
+                <Sparkles className="h-4 w-4" />{aiStatus === 'loading' ? 'Leyendo y creando…' : 'Crear lead con IA'}
+              </Button>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
