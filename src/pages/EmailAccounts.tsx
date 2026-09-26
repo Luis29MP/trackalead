@@ -50,6 +50,7 @@ export function EmailAccounts() {
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<FormState>(EMPTY)
+  const [pickTerritory, setPickTerritory] = useState('')   // provincia elegida en el diálogo
   const [saving, setSaving] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
 
@@ -66,15 +67,21 @@ export function EmailAccounts() {
 
   const boardName = (id: string | null) => { const b = boards.find(x => x.id === id); return b ? boardLabel(b, territories) : null }
 
-  function openNew() { setForm(EMPTY); setOpen(true) }
+  function openNew() { setForm(EMPTY); setPickTerritory(''); setOpen(true) }
   function openEdit(a: EmailAccount) {
     setForm({
       id: a.id, board_id: a.board_id ?? '', label: a.label ?? '', from_email: a.from_email,
       from_name: a.from_name ?? '', smtp_host: a.smtp_host, smtp_port: a.smtp_port,
       smtp_secure: a.smtp_secure, smtp_user: a.smtp_user, smtp_pass: '',
     })
+    // Prefijar la provincia según el tablero guardado
+    const bd = boards.find(b => b.id === a.board_id)
+    setPickTerritory(bd?.territory_id ?? '')
     setOpen(true)
   }
+
+  // Subtableros de la provincia elegida
+  const boardsForTerritory = pickTerritory ? boards.filter(b => b.territory_id === pickTerritory) : []
 
   async function save() {
     if (!form.from_email.trim() || !form.smtp_host.trim()) { toast.error('Faltan el correo y el servidor SMTP'); return }
@@ -165,15 +172,27 @@ export function EmailAccounts() {
         <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{form.id ? 'Editar cuenta de correo' : 'Nueva cuenta de correo'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label>Web / tablero (opcional)</Label>
-              <Select value={form.board_id || 'none'} onValueChange={v => setForm(f => ({ ...f, board_id: v === 'none' ? '' : v }))}>
-                <SelectTrigger><SelectValue placeholder="Sin tablero" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Sin tablero (general)</SelectItem>
-                  {boards.map(b => <SelectItem key={b.id} value={b.id}>{boardLabel(b, territories)}</SelectItem>)}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Provincia / territorio</Label>
+                <Select value={pickTerritory || 'none'} onValueChange={v => { setPickTerritory(v === 'none' ? '' : v); setForm(f => ({ ...f, board_id: '' })) }}>
+                  <SelectTrigger><SelectValue placeholder="Sin territorio" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin territorio</SelectItem>
+                    {territories.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Subtablero (web)</Label>
+                <Select value={form.board_id || 'none'} onValueChange={v => setForm(f => ({ ...f, board_id: v === 'none' ? '' : v }))} disabled={!pickTerritory}>
+                  <SelectTrigger><SelectValue placeholder={pickTerritory ? 'Elige tablero' : 'Elige provincia primero'} /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin tablero (general)</SelectItem>
+                    {boardsForTerritory.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
