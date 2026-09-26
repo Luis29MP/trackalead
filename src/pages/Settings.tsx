@@ -23,7 +23,8 @@ import { getInitials, formatDate } from '@/lib/utils'
 import { AiIntegrations } from '@/components/settings/AiIntegrations'
 import { Integrations } from '@/components/settings/Integrations'
 import { BudgetLibrary } from '@/pages/BudgetLibrary'
-import { BookOpen } from 'lucide-react'
+import { EmailAccounts } from '@/pages/EmailAccounts'
+import { BookOpen, Mail } from 'lucide-react'
 import type { OrgMember, Profile, UserRole } from '@/types'
 
 const ROLE_LABEL: Record<string, string> = {
@@ -203,6 +204,7 @@ export function Settings() {
           <TabsTrigger value="security"><Lock className="h-3.5 w-3.5 mr-1.5" />Seguridad</TabsTrigger>
           <TabsTrigger value="ai"><Sparkles className="h-3.5 w-3.5 mr-1.5" />Integraciones IA</TabsTrigger>
           <TabsTrigger value="biblioteca"><BookOpen className="h-3.5 w-3.5 mr-1.5" />Biblioteca</TabsTrigger>
+          <TabsTrigger value="correo"><Mail className="h-3.5 w-3.5 mr-1.5" />Correo</TabsTrigger>
           <TabsTrigger value="integrations"><Plug className="h-3.5 w-3.5 mr-1.5" />Integraciones</TabsTrigger>
         </TabsList>
 
@@ -485,6 +487,10 @@ export function Settings() {
 
         <TabsContent value="biblioteca" className="space-y-5">
           <BudgetLibrary />
+        </TabsContent>
+
+        <TabsContent value="correo" className="space-y-5">
+          <EmailAccounts />
         </TabsContent>
 
         <TabsContent value="integrations" className="space-y-5">
