@@ -277,6 +277,25 @@ interface NewLeadForm {
 }
 const EMPTY: NewLeadForm = { name: '', company: '', concept: '', zone: '', phone: '', email: '', source: 'form', notes: '' }
 
+// Imagen → base64 JPEG redimensionado (máx. 1500px) para la visión de la IA
+function fileToResizedImage(file: File): Promise<{ mime: string; data: string }> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      const max = 1500, scale = Math.min(1, max / Math.max(img.width, img.height))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale)
+      const ctx = canvas.getContext('2d'); if (!ctx) { URL.revokeObjectURL(url); reject(new Error('canvas')); return }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      const d = canvas.toDataURL('image/jpeg', 0.75); URL.revokeObjectURL(url)
+      resolve({ mime: 'image/jpeg', data: d.split(',')[1] })
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('img')) }
+    img.src = url
+  })
+}
+
 // Código de gremio para la referencia (mismo criterio que en Presupuestos)
 const VERTICAL_CODE: Record<string, string> = {
   carpinteria: 'C', reformas: 'R', carpinteria_metalica: 'CM', pintura: 'P',
@@ -471,6 +490,7 @@ export function KanbanBoard() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<NewLeadForm>(EMPTY)
   const [pasteText, setPasteText] = useState('')
+  const [leadFiles, setLeadFiles] = useState<{ file: File; name: string; mime: string; data: string; previewUrl: string | null; kind: 'image' | 'pdf' }[]>([])
   const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'done'>('idle')
   const [geoStatus, setGeoStatus] = useState<'idle' | 'loading' | 'ok' | 'fail'>('idle')
   const [latLng, setLatLng] = useState<{ lat: number; lng: number } | null>(null)
@@ -535,6 +555,7 @@ export function KanbanBoard() {
     setTargetColumnId(columnId)
     setForm(EMPTY)
     setPasteText('')
+    setLeadFiles([])
     setGeoStatus('idle')
     setLatLng(null)
     setAiStatus('idle')
@@ -581,13 +602,42 @@ export function KanbanBoard() {
     toast.success('Datos extraídos')
   }
 
+  // Adjuntos del lead: imagen → base64 redimensionado (para la IA); PDF → se guarda para subir.
+  async function addLeadFiles(fileList: FileList | null) {
+    const files = Array.from(fileList || [])
+    for (const file of files) {
+      if (leadFiles.length >= 5) { toast.error('Máximo 5 archivos'); break }
+      const isImage = file.type.startsWith('image/')
+      const isPdf = file.type === 'application/pdf'
+      if (!isImage && !isPdf) { toast.error(`"${file.name}": usa imagen o PDF`); continue }
+      if (file.size > 10 * 1024 * 1024) { toast.error(`"${file.name}" pesa más de 10 MB`); continue }
+      if (isImage) {
+        const img = await fileToResizedImage(file)   // { mime, data }
+        setLeadFiles(prev => [...prev, { file, name: file.name, mime: img.mime, data: img.data, previewUrl: `data:${img.mime};base64,${img.data}`, kind: 'image' }])
+      } else {
+        setLeadFiles(prev => [...prev, { file, name: file.name, mime: file.type, data: '', previewUrl: null, kind: 'pdf' }])
+      }
+    }
+  }
+  function removeLeadFile(idx: number) { setLeadFiles(prev => prev.filter((_, i) => i !== idx)) }
+
   async function handleAISummary() {
     const rawText = pasteText.trim() ? pasteText : form.notes
-    if (!rawText.trim()) { toast.error('Pega o escribe el mensaje del cliente primero'); return }
+    if (!rawText.trim() && leadFiles.length === 0) { toast.error('Pega el mensaje del cliente o adjunta una foto/PDF'); return }
     setAiStatus('loading')
     try {
       const { analyzeLeadMessage } = await import('@/lib/ai')
-      const a = await analyzeLeadMessage(rawText)
+      // Imágenes para visión IA + texto extraído de los PDFs adjuntos
+      const images = leadFiles.filter(f => f.kind === 'image').map(f => ({ mime: f.mime, data: f.data }))
+      let extraText = ''
+      const pdfs = leadFiles.filter(f => f.kind === 'pdf')
+      if (pdfs.length) {
+        try {
+          const { extractKnowledgeText } = await import('@/lib/extractText')
+          for (const p of pdfs) { const t = await extractKnowledgeText(p.file); if (t.trim()) extraText += `\n\n[${p.name}]\n${t.slice(0, 20000)}` }
+        } catch { /* si falla la extracción del PDF, seguimos con lo demás */ }
+      }
+      const a = await analyzeLeadMessage(`${rawText}${extraText}`.trim(), images)
       // Completa el análisis con lo que ya haya en el formulario (p. ej. el teléfono
       // introducido a mano no viene en el mensaje pegado): así el resumen lo incluye.
       const merged = {
@@ -654,10 +704,25 @@ export function KanbanBoard() {
           action: 'created',
           metadata: { source: form.source },
         })
+
+        // Guardar los adjuntos del cliente en la ficha del lead (fotos/PDF)
+        if (leadFiles.length) {
+          for (const f of leadFiles) {
+            try {
+              const path = `${organization!.id}/${newLead.id}/${Date.now()}-${f.name}`
+              const { data: up } = await supabase.storage.from('lead-files').upload(path, f.file, { upsert: true })
+              if (up) {
+                const url = supabase.storage.from('lead-files').getPublicUrl(up.path).data.publicUrl
+                await supabase.from('lead_files').insert({ lead_id: newLead.id, name: f.name, url, type: f.file.type, size: f.file.size })
+              }
+            } catch { /* si un adjunto falla, no bloquea la creación */ }
+          }
+        }
       }
 
       toast.success('Lead creado')
       setDialog(false)
+      setLeadFiles([])
       await refetch()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al crear lead')
@@ -812,6 +877,27 @@ export function KanbanBoard() {
                 onChange={e => setPasteText(e.target.value)}
                 className="text-xs resize-none"
               />
+              {/* Adjuntos del cliente (fotos/PDF): la IA los lee y se guardan en el lead */}
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-amber-700 font-medium">📎 Fotos/PDF del cliente (la IA los lee)</span>
+                  <label className="text-[11px] text-amber-700 underline cursor-pointer">
+                    + Adjuntar
+                    <input type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={e => { addLeadFiles(e.target.files); e.target.value = '' }} />
+                  </label>
+                </div>
+                {leadFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {leadFiles.map((f, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 bg-white border border-amber-200 rounded-full pl-1 pr-1.5 py-0.5 text-[11px]">
+                        {f.previewUrl ? <img src={f.previewUrl} className="w-4 h-4 rounded object-cover" alt="" /> : <span>📄</span>}
+                        <span className="max-w-[110px] truncate">{f.name}</span>
+                        <button onClick={() => removeLeadFile(i)} className="text-red-500 font-bold">×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={handleSmartPaste} disabled={!pasteText.trim()} className="flex-1">
                   Extraer campos

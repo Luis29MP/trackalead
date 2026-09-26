@@ -344,13 +344,15 @@ Reglas:
 - "photos": true/false según si el cliente menciona o adjunta fotos.
 - No inventes datos que no estén ni puedan deducirse razonablemente; usa "" cuando falte.`
 
-export async function analyzeLeadMessage(text: string): Promise<LeadAnalysis> {
+export async function analyzeLeadMessage(text: string, images: AiImage[] = []): Promise<LeadAnalysis> {
   const { supabase } = await import('./supabase')
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('No hay usuario para la IA')
 
+  const prompt = (text?.trim() ? `Mensaje del cliente:\n\n${text}` : 'Sin texto: analiza las imágenes/adjuntos del cliente.')
+    + (images.length ? `\n\nSe adjuntan ${images.length} imagen(es) del cliente (fotos de la obra, capturas de WhatsApp, planos…): extrae de ahí medidas, dirección, tipo de trabajo, materiales y contacto.` : '')
   const { data, error } = await supabase.functions.invoke('ai-proxy', {
-    body: { user_id: user.id, prompt: `Mensaje del cliente:\n\n${text}`, system: LEAD_ANALYSIS_SYSTEM, max_tokens: 1500, web_search: false, images: [] },
+    body: { user_id: user.id, prompt, system: LEAD_ANALYSIS_SYSTEM, max_tokens: 1500, web_search: false, images },
   })
   if (error) {
     let detail = error.message
